@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* Add this to make the background completely black behind the app */
+body {
+  background-color: #000;
+  margin: 0;
+}
+
