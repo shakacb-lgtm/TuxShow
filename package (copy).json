@@ -46,7 +46,7 @@
         }
       ],
       "category": "AudioVideo",
-      "icon": "public/icon.png"
+      "icon": "build/icon.png"
     },
     "directories": {
       "output": "release"

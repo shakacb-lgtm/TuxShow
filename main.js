@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import os from 'os';
 
+// --- HARDWARE GPU TUNING ---
 function applyHardwareTuning() {
   let currentGpuStatus = "Standard GPU Accelerated";
   let isIntel = false;
@@ -11,17 +12,13 @@ function applyHardwareTuning() {
   let isAMD = false;
   let isNvidia = false;
 
-  // 1. Hardware Detection via Linux lspci
   if (os.platform() === 'linux') {
     try {
       const lspciOutput = execSync('lspci -nn | grep -i vga', { encoding: 'utf-8' }).toLowerCase();
       if (lspciOutput.includes('intel')) isIntel = true;
-      
-      // Look for known problematic legacy Intel architectures
       if (lspciOutput.includes('haswell') || lspciOutput.includes('ivy bridge') || lspciOutput.includes('sandy bridge') || lspciOutput.includes('hd graphics 4')) {
          isLegacyIntel = true;
       }
-      
       if (lspciOutput.includes('amd') || lspciOutput.includes('radeon')) isAMD = true;
       if (lspciOutput.includes('nvidia')) isNvidia = true;
     } catch (e) {
@@ -29,17 +26,12 @@ function applyHardwareTuning() {
     }
   }
 
-  // 2. Conditional Chromium Graphics Tuning
   if (isLegacyIntel) {
     console.log("TuxShow: Legacy Intel GPU detected (Haswell/Older). Enabling Safe Fallback Mode.");
-    // Haswell VAAPI video decoding is broken on many modern Linux kernels.
-    // We disable hardware video decoding to prevent complete GPU process crashes, letting the CPU handle it.
     app.commandLine.appendSwitch('disable-accelerated-video-decode'); 
     app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames');
     currentGpuStatus = "Legacy Fallback Mode (Haswell)";
-    
   } else {
-    // Standard Modern GPU Tuning
     app.commandLine.appendSwitch('ignore-gpu-blocklist');
     app.commandLine.appendSwitch('disable-software-rasterizer');
     app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -47,21 +39,17 @@ function applyHardwareTuning() {
     app.commandLine.appendSwitch('use-gl', 'desktop');
 
     if ((isIntel || isAMD) && !isNvidia) {
-      console.log("TuxShow: Modern Intel/AMD iGPU detected. Enabling Zero-Copy Unified Memory optimizations.");
       app.commandLine.appendSwitch('enable-zero-copy');
       app.commandLine.appendSwitch('enable-native-gpu-memory-buffers');
       currentGpuStatus = "Zero-Copy Unified Memory Accelerated";
     } else {
-      console.log("TuxShow: Dedicated GPU (or Nvidia) detected. Bypassing Zero-Copy for maximum stability.");
       currentGpuStatus = "Standard GPU Accelerated";
     }
   }
   
-  // Provide the status string to the React UI via IPC
   ipcMain.handle('get-gpu-status', () => currentGpuStatus);
 }
 
-// Execute tuning BEFORE the app is "ready"
 applyHardwareTuning();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -76,6 +64,7 @@ function createWindow() {
     ? path.join(__dirname, 'dist', 'icon.png') 
     : path.join(__dirname, 'public', 'icon.png');
 
+  // --- SPLASH SCREEN RESTORED ---
   splashWindow = new BrowserWindow({
     width: 1024, height: 559, frame: false, alwaysOnTop: true,
     backgroundColor: '#0f172a', show: true, icon: iconPath
@@ -84,6 +73,7 @@ function createWindow() {
   if (app.isPackaged) splashWindow.loadFile(path.join(__dirname, 'dist', 'splash.html'));
   else splashWindow.loadFile(path.join(__dirname, 'public', 'splash.html'));
 
+  // --- MAIN CONTROL WINDOW ---
   mainWindow = new BrowserWindow({
     width: 1280, height: 720, title: "TuxShow", show: false, icon: iconPath,
     webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false }
@@ -118,7 +108,6 @@ function createWindow() {
 
     projectorWindow.on('closed', () => {
       projectorWindow = null;
-      // Tell the React frontend the window was closed so the button resets to green
       if (mainWindow && !mainWindow.isDestroyed()) {
          mainWindow.webContents.send('projector-closed');
       }
@@ -129,6 +118,16 @@ function createWindow() {
     if (projectorWindow) {
       projectorWindow.close();
     }
+  });
+
+  // --- OMT BROADCAST IPC STUBS ---
+  ipcMain.on('start-omt-broadcast', () => {
+    console.log("Backend received: Start OMT Broadcast");
+    // Future OMT Network routing logic will go here
+  });
+
+  ipcMain.on('stop-omt-broadcast', () => {
+    console.log("Backend received: Stop OMT Broadcast");
   });
 }
 

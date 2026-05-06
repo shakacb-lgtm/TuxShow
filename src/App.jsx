@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Square, Video, Music, Settings, Maximize, AlertCircle, ChevronRight, Edit3, Plus, Trash2, Crosshair, ArrowRight, Layers, StopCircle, MonitorUp, MonitorDown, Grid3X3, RotateCcw, GripVertical, Image as ImageIcon, Clock, Save, FolderOpen, FilePlus, Pause, Activity, CornerDownRight, FolderPlus, FileText, Camera, Moon, PauseCircle, Search, Hash, Crop, X, Check, Repeat } from 'lucide-react';
+import { Play, Square, Video, Music, Settings, Maximize, AlertCircle, ChevronRight, ChevronDown, Edit3, Plus, Trash2, Crosshair, ArrowRight, Layers, StopCircle, MonitorUp, MonitorDown, Grid3X3, RotateCcw, GripVertical, Image as ImageIcon, Clock, Save, FolderOpen, Folder, FilePlus, Pause, Activity, CornerDownRight, FolderPlus, FileText, Camera, Moon, PauseCircle, Search, Hash, Crop, X, Check, Repeat, XSquare, CalendarClock, Type, Radio, RefreshCw } from 'lucide-react';
 
 // --- TIME FORMAT HELPER ---
 const formatTime = (timeInSeconds) => {
@@ -11,7 +11,7 @@ const formatTime = (timeInSeconds) => {
 
 // --- AUDIO VISUALIZER COMPONENT ---
 const AudioVisualizer = ({ isPlaying, isPaused, type }) => {
-  if (!isPlaying || type === 'image' || type === 'goto' || type === 'pause' || type === 'blackout' || type === 'counter') return null;
+  if (!isPlaying || type === 'image' || type === 'goto' || type === 'pause' || type === 'blackout' || type === 'counter' || type === 'stop' || type === 'group' || type === 'time' || type === 'text') return null;
   return (
     <div className="flex items-end gap-[2px] h-3 ml-3 shrink-0" title={isPaused ? "Audio Paused" : "Audio Playing"}>
       <div className="w-[3px] bg-green-500 rounded-t-sm origin-bottom" style={{ animation: `meter 0.4s ease-in-out infinite alternate ${isPaused ? 'paused' : 'running'}`, height: '100%' }} />
@@ -100,27 +100,39 @@ const CameraMasterPlayer = ({ cue, isPaused }) => {
     const startCamera = async () => {
       if ((cue.state === 'playing' || cue.state === 'stopping') && cue.cameraLive) {
         try {
-          if (cue.url) {
-            try {
-              stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: cue.url } } });
-            } catch (fallbackErr) {
-              stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          if (cue.url && (cue.url.startsWith('omt://') || cue.url.startsWith('rtsp://') || cue.url.startsWith('http'))) {
+            if (videoRef.current) {
+              videoRef.current.srcObject = null;
+              videoRef.current.src = cue.url;
+              if (isPaused) videoRef.current.pause(); 
             }
           } else {
-            stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          }
-          
-          if (videoRef.current && stream) {
-            videoRef.current.srcObject = stream;
-            if (isPaused) videoRef.current.pause(); 
+            if (cue.url) {
+              try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: cue.url } } });
+              } catch (fallbackErr) {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+              }
+            } else {
+              stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            }
+            
+            if (videoRef.current && stream) {
+              videoRef.current.src = "";
+              videoRef.current.srcObject = stream;
+              if (isPaused) videoRef.current.pause(); 
+            }
           }
         } catch (err) { 
-          console.warn("Camera Warning: Could not start video source. Hardware may be in use or disconnected."); 
+          console.warn("Camera/Stream Warning: Could not start video source. Hardware may be in use or disconnected."); 
         }
       } else {
-        if (videoRef.current && videoRef.current.srcObject) {
-          videoRef.current.srcObject.getTracks().forEach(t => t.stop());
-          videoRef.current.srcObject = null;
+        if (videoRef.current) {
+          if (videoRef.current.srcObject) {
+            videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+            videoRef.current.srcObject = null;
+          }
+          videoRef.current.src = "";
         }
       }
     };
@@ -129,13 +141,50 @@ const CameraMasterPlayer = ({ cue, isPaused }) => {
   }, [cue.state, cue.cameraLive, cue.url]);
 
   useEffect(() => {
-    if (videoRef.current && videoRef.current.srcObject) {
+    if (videoRef.current && (videoRef.current.srcObject || videoRef.current.src)) {
       if (isPaused) videoRef.current.pause();
       else videoRef.current.play().catch(e => console.log("Camera Autoplay Wait:", e));
     }
   }, [isPaused]);
 
   return <video id={`master-vid-${cue.id}`} ref={videoRef} autoPlay playsInline muted />;
+};
+
+// --- TEXT MASTER PLAYER ---
+const TextMasterPlayer = ({ cue }) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = 1920;
+    const h = 1080;
+    canvas.width = w;
+    canvas.height = h;
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (cue.textContent) {
+      ctx.fillStyle = cue.textColor || '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const fontSize = (cue.textScale || 100);
+      ctx.font = `bold ${fontSize}px sans-serif`;
+
+      const lines = cue.textContent.split('\n');
+      const lineHeight = fontSize * 1.2;
+      const totalHeight = lineHeight * lines.length;
+      let startY = (h - totalHeight) / 2 + (lineHeight / 2);
+
+      lines.forEach(line => {
+        ctx.fillText(line, w / 2, startY);
+        startY += lineHeight;
+      });
+    }
+  }, [cue.textContent, cue.textColor, cue.textScale]);
+
+  return <canvas id={`master-text-${cue.id}`} ref={canvasRef} />;
 };
 
 // --- MASK EDITOR OVERLAY ---
@@ -286,11 +335,18 @@ const getNativeFilePath = (file) => {
 
 const getFileInfo = (url, cueType) => {
   let fileName = 'Unknown'; let fileType = 'Unknown'; let displayPath = url || '';
-  if (cueType === 'camera') return { fileName: 'Live Capture Feed', fileType: 'STREAM', displayPath: url ? `Hardware ID: ${url}` : 'Default System Camera' };
+  if (cueType === 'camera') {
+     const isNetwork = url && (url.startsWith('omt://') || url.startsWith('rtsp://') || url.startsWith('http'));
+     return { fileName: isNetwork ? 'OMT / Network Stream' : 'Live Capture Feed', fileType: 'STREAM', displayPath: isNetwork ? url : (url ? `Hardware ID: ${url}` : 'Default System Camera') };
+  }
   if (cueType === 'blackout') return { fileName: 'Stage Blackout', fileType: 'ACTION', displayPath: 'Internal Video Engine' };
   if (cueType === 'pause') return { fileName: 'Pause Show', fileType: 'ACTION', displayPath: 'Internal Control Engine' };
   if (cueType === 'goto') return { fileName: 'GoTo Pointer', fileType: 'ACTION', displayPath: 'Internal Control Engine' };
   if (cueType === 'counter') return { fileName: 'Loop Counter', fileType: 'ACTION', displayPath: 'Internal Control Engine' };
+  if (cueType === 'stop') return { fileName: 'Targeted Stop', fileType: 'ACTION', displayPath: 'Internal Control Engine' };
+  if (cueType === 'group') return { fileName: 'Group Folder', fileType: 'FOLDER', displayPath: 'Internal Logic Container' };
+  if (cueType === 'time') return { fileName: 'Scheduled Trigger', fileType: 'ACTION', displayPath: 'Internal Clock Engine' };
+  if (cueType === 'text') return { fileName: 'Text / Title Generator', fileType: 'GRAPHIC', displayPath: 'Internal Render Engine' };
   if (url) {
      try {
          const parts = decodeURIComponent(new URL(url).pathname).split('/');
@@ -307,30 +363,10 @@ const getFileInfo = (url, cueType) => {
   return { fileName, fileType, displayPath };
 };
 
-const resolveCue = (cueId, cueList, depth = 0) => {
-  if (depth > 10) return null; 
-  const cue = cueList.find(c => c.id === cueId);
-  if (!cue) return null;
-  if (cue.type === 'goto') {
-    if (cue.gotoMode === 'random') {
-      const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
-      if (!isNaN(val1) && !isNaN(val2)) {
-         const minVal = Math.min(val1, val2); const maxVal = Math.max(val1, val2);
-         const validCues = cueList.filter(c => { const num = parseFloat(c.number); return !isNaN(num) && num >= minVal && num <= maxVal; });
-         if (validCues.length > 0) return resolveCue(validCues[Math.floor(Math.random() * validCues.length)].id, cueList, depth + 1);
-      }
-      return null;
-    } else {
-      const target = cueList.find(c => String(c.number) === String(cue.targetCueNumber));
-      return target ? resolveCue(target.id, cueList, depth + 1) : null;
-    }
-  }
-  return cue;
-};
-
 export default function App() {
   const [isProjector, setIsProjector] = useState(window.location.hash === '#projector' || window.name === 'ProjectorOutput');
   const [projectorActive, setProjectorActive] = useState(false);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
   const projectorWinRef = useRef(null);
 
   useEffect(() => {
@@ -339,7 +375,16 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
-  // Listen for the Electron window closing manually
+  useEffect(() => {
+    try {
+      const { ipcRenderer } = window.require('electron');
+      if (isBroadcasting) ipcRenderer.send('start-omt-broadcast');
+      else ipcRenderer.send('stop-omt-broadcast');
+    } catch(e) {
+      console.log(`OMT Broadcast ${isBroadcasting ? 'Started' : 'Stopped'}`);
+    }
+  }, [isBroadcasting]);
+
   useEffect(() => {
     try {
       const { ipcRenderer } = window.require('electron');
@@ -350,17 +395,21 @@ export default function App() {
   }, []);
 
   const [cues, setCues] = useState([
-    { id: '1', number: '1', type: 'video', name: 'Background Loop', url: MEDIA.video1, state: 'stopped', loop: true, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 2.0, volume: 1, targetCueNumber: '', notes: 'Wait for house lights to fully dim.', cameraLive: true, maskEnabled: false, maskDataUrl: null },
-    { id: '2', number: '2', type: 'audio', name: 'Ambient Music', url: MEDIA.audio2, state: 'stopped', loop: true, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 5.0, volume: 0.5, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null },
-    { id: '3', number: '3', type: 'image', name: 'Overlay Graphic', url: MEDIA.image1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 1.0, autoAdvance: true, advanceTime: 4, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null },
-    { id: '4', number: '4', type: 'camera', name: 'Stage Live Feed', url: '', state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 1.0, volume: 1, targetCueNumber: '', notes: 'Standby for guest speaker', cameraLive: true, maskEnabled: false, maskDataUrl: null },
-    { id: '5', number: '5', type: 'goto', name: 'Randomize Intro Video', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, gotoMode: 'random', targetCueRangeMin: '1', targetCueRangeMax: '3' },
-    { id: '6', number: '6', type: 'blackout', name: 'Fade to Black', url: '', state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 3.0, volume: 1, targetCueNumber: '', notes: 'Global 3 second hard stop.', cameraLive: true, maskEnabled: false, maskDataUrl: null },
-    { id: '7', number: '7', type: 'counter', name: 'Repeat Loop 3 Times', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'auto-follow', fadeTime: 0, volume: 1, targetCueNumber: '1', notes: 'Increment and proceed, or jump if limit reached.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 3, counterCurrent: 0 },
+    { id: '0', number: '0', type: 'group', name: 'Pre-Show Sequence', url: '', state: 'stopped', groupMode: 'fire-all', isExpanded: true, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '1', number: '1', type: 'video', name: 'Background Loop', url: MEDIA.video1, state: 'stopped', loop: true, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 2.0, volume: 1, targetCueNumber: '', notes: 'Wait for house lights to fully dim.', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: '0', scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '2', number: '2', type: 'audio', name: 'Ambient Music', url: MEDIA.audio2, state: 'stopped', loop: true, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 5.0, volume: 0.5, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: '0', scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '3', number: '3', type: 'image', name: 'Overlay Graphic', url: MEDIA.image1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 1.0, autoAdvance: true, advanceTime: 4, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '4', number: '4', type: 'camera', name: 'Stage Live Feed', url: '', state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 1.0, volume: 1, targetCueNumber: '', notes: 'Standby for guest speaker', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '5', number: '5', type: 'goto', name: 'Randomize Intro Video', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, gotoMode: 'random', targetCueRangeMin: '1', targetCueRangeMax: '3', groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '6', number: '6', type: 'blackout', name: 'Fade to Black', url: '', state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 3.0, volume: 1, targetCueNumber: '', notes: 'Global 3 second hard stop.', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '7', number: '7', type: 'counter', name: 'Repeat Loop 3 Times', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'auto-follow', fadeTime: 0, volume: 1, targetCueNumber: '1', notes: 'Increment and proceed, or jump if limit reached.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 3, counterCurrent: 0, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '8', number: '8', type: 'stop', name: 'Stop Ambient Music', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '2', notes: 'Targeted stop for Cue 2.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '9', number: '9', type: 'time', name: 'Wait for Start Time', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'auto-follow', fadeTime: 0, volume: 1, targetCueNumber: '', notes: 'Holds the show in a paused state until the clock hits the exact target time, then automatically triggers the next cue.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '17:00', textContent: '', textColor: '#ffffff', textScale: 100 },
+    { id: '10', number: '10', type: 'text', name: 'Intermission Label', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 1.0, volume: 1, targetCueNumber: '', notes: 'Overlays a generated label', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '', textContent: 'INTERMISSION\nWill return shortly...', textColor: '#ffcc00', textScale: 120 },
   ]);
   
-  const [selectedCueIds, setSelectedCueIds] = useState(['1']);
-  const [lastSelectedId, setLastSelectedId] = useState('1'); 
+  const [selectedCueIds, setSelectedCueIds] = useState(['0']);
+  const [lastSelectedId, setLastSelectedId] = useState('0'); 
   const [isMappingMode, setIsMappingMode] = useState(false);
   const [editingMaskCueId, setEditingMaskCueId] = useState(null); 
   const [mediaTimes, setMediaTimes] = useState({}); 
@@ -370,6 +419,7 @@ export default function App() {
   const [metadata, setMetadata] = useState({}); 
   const [videoDevices, setVideoDevices] = useState([]); 
   const [jumpToValue, setJumpToValue] = useState(""); 
+  const [networkStreams, setNetworkStreams] = useState([]);
   
   const probedCues = useRef(new Set()); 
   const [gridSize, setGridSize] = useState({ x: 1, y: 1 });
@@ -392,14 +442,193 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, []);
 
+  const evaluateCue = useCallback((cueId, currentCues, depth = 0) => {
+    if (depth > 10) return []; 
+    const cue = currentCues.find(c => c.id === cueId); 
+    if (!cue) return [];
+    
+    if (cue.type === 'goto') {
+        if (cue.gotoMode === 'random') {
+             const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
+             if (!isNaN(val1) && !isNaN(val2)) {
+                const validCues = currentCues.filter(c => { const num = parseFloat(c.number); return !isNaN(num) && num >= Math.min(val1, val2) && num <= Math.max(val1, val2); });
+                if (validCues.length > 0) return evaluateCue(validCues[Math.floor(Math.random() * validCues.length)].id, currentCues, depth + 1);
+             } return [];
+        } else {
+             const target = currentCues.find(c => String(c.number) === String(cue.targetCueNumber)); 
+             return target ? evaluateCue(target.id, currentCues, depth + 1) : []; 
+        }
+    }
+    if (cue.type === 'counter') {
+        return [cue]; 
+    }
+    if (cue.type === 'group') {
+        const children = currentCues.filter(c => c.groupId === cue.id);
+        if (children.length === 0) return [];
+        if (cue.groupMode === 'fire-first') {
+            return evaluateCue(children[0].id, currentCues, depth + 1);
+        } else {
+            return children.flatMap(child => evaluateCue(child.id, currentCues, depth + 1));
+        }
+    }
+    return [cue];
+  }, []);
+
+  const handleGo = useCallback(() => {
+    if (selectedCueIds.length === 0) return;
+    setIsPaused(false); 
+    setCues(prev => {
+      let nextState = [...prev]; const resolvedCues = []; const mutations = {};
+      
+      selectedCueIds.forEach(id => {
+         const cue = prev.find(c => c.id === id);
+         if (cue && cue.type === 'counter') {
+            const current = (mutations[cue.id]?.counterCurrent ?? cue.counterCurrent) || 0;
+            if (current + 1 >= (cue.counterLimit || 1)) {
+               mutations[cue.id] = { counterCurrent: 0 }; 
+               const target = prev.find(c => String(c.number) === String(cue.targetCueNumber));
+               if (target) resolvedCues.push(...evaluateCue(target.id, prev));
+            } else { 
+               mutations[cue.id] = { counterCurrent: current + 1 }; 
+               resolvedCues.push(cue);
+            }
+         } else {
+            resolvedCues.push(...evaluateCue(id, prev));
+         }
+      });
+      
+      const resolvedIds = resolvedCues.map(c => c.id);
+      if (resolvedIds.length === 0 && Object.keys(mutations).length === 0) return prev; 
+      
+      const hasHardStop = resolvedCues.some(c => c.triggerBehavior === 'stop-others');
+      nextState = nextState.map(cue => {
+        let updatedCue = { ...cue, ...(mutations[cue.id] || {}) };
+        if (resolvedIds.includes(cue.id)) return { ...updatedCue, state: 'playing' };
+        if (hasHardStop && !resolvedIds.includes(cue.id) && cue.state === 'playing') return cue.fadeTime > 0 ? { ...updatedCue, state: 'stopping' } : { ...updatedCue, state: 'stopped' };
+        return updatedCue;
+      });
+      
+      const baseIds = resolvedIds.length > 0 ? resolvedIds : selectedCueIds;
+      const lastTargetIndex = Math.max(...baseIds.map(id => prev.findIndex(c => c.id === id)));
+      if (lastTargetIndex >= 0 && lastTargetIndex < prev.length - 1) { 
+          const nextSelectionId = prev[lastTargetIndex + 1].id; 
+          setTimeout(() => { setSelectedCueIds([nextSelectionId]); setLastSelectedId(nextSelectionId); scrollCueIntoView(nextSelectionId); }, 0); 
+      } else if (lastTargetIndex === prev.length - 1) { 
+          const currentSelectionId = prev[lastTargetIndex].id; 
+          setTimeout(() => { setSelectedCueIds([currentSelectionId]); setLastSelectedId(currentSelectionId); scrollCueIntoView(currentSelectionId); }, 0); 
+      }
+      return nextState;
+    });
+  }, [selectedCueIds, scrollCueIntoView, evaluateCue]);
+
+  const triggerNextCueAfter = useCallback((currentCueId) => {
+    setCues(prev => {
+       const currentIndex = prev.findIndex(c => c.id === currentCueId);
+       if (currentIndex >= 0 && currentIndex < prev.length - 1) {
+          const nextCueRaw = prev[currentIndex + 1]; const mutations = {};
+          
+          let nextCues = [];
+          if (nextCueRaw.type === 'counter') {
+              const current = (mutations[nextCueRaw.id]?.counterCurrent ?? nextCueRaw.counterCurrent) || 0;
+              if (current + 1 >= (nextCueRaw.counterLimit || 1)) { 
+                 mutations[nextCueRaw.id] = { counterCurrent: 0 }; 
+                 const target = prev.find(c => String(c.number) === String(nextCueRaw.targetCueNumber)); 
+                 if (target) nextCues.push(...evaluateCue(target.id, prev));
+              } else { 
+                 mutations[nextCueRaw.id] = { counterCurrent: current + 1 }; 
+                 nextCues.push(nextCueRaw);
+              }
+          } else {
+              nextCues = evaluateCue(nextCueRaw.id, prev);
+          }
+
+          if (nextCues.length === 0 && Object.keys(mutations).length === 0) return prev; 
+          
+          let nextState = prev.map(cue => mutations[cue.id] ? { ...cue, ...mutations[cue.id] } : cue);
+          if (nextCues.length > 0) {
+            const hasHardStop = nextCues.some(c => c.triggerBehavior === 'stop-others');
+            if (hasHardStop) {
+               nextState = nextState.map(c => !nextCues.find(n => n.id === c.id) && c.state === 'playing' ? { ...c, state: c.fadeTime > 0 ? 'stopping' : 'stopped' } : c);
+            }
+            nextState = nextState.map(c => nextCues.find(n => n.id === c.id) ? { ...c, state: 'playing' } : c);
+            
+            setTimeout(() => { setSelectedCueIds(prevSelected => { 
+                if (prevSelected.length === 1 && prevSelected[0] === nextCueRaw.id) { 
+                    const baseIds = nextCues.map(c => c.id);
+                    const lastTargetIndex = Math.max(...baseIds.map(id => prev.findIndex(c => c.id === id)));
+                    if (lastTargetIndex >= 0 && lastTargetIndex < prev.length - 1) { 
+                        const pushedId = prev[lastTargetIndex + 1].id; 
+                        setLastSelectedId(pushedId); scrollCueIntoView(pushedId); return [pushedId]; 
+                    } 
+                } 
+                return prevSelected; 
+            }); }, 0);
+          } return nextState;
+       } return prev;
+    });
+  }, [scrollCueIntoView, evaluateCue]);
+
   useEffect(() => {
-    const actionCues = cues.filter(c => (c.type === 'pause' || c.type === 'counter') && c.state === 'playing');
+    const actionCues = cues.filter(c => (c.type === 'pause' || c.type === 'counter' || c.type === 'stop') && c.state === 'playing');
     if (actionCues.length > 0) {
       if (actionCues.some(c => c.type === 'pause')) setIsPaused(true);
-      setCues(prev => prev.map(c => (c.type === 'pause' || c.type === 'counter') && c.state === 'playing' ? { ...c, state: 'stopped' } : c));
+      
+      const targetIdsToStop = actionCues.filter(c => c.type === 'stop')
+        .flatMap(sc => evaluateCue(cues.find(c => String(c.number) === String(sc.targetCueNumber))?.id, cues))
+        .map(c => c.id).filter(Boolean);
+
+      setCues(prev => prev.map(c => {
+         let updated = c;
+         if ((c.type === 'pause' || c.type === 'counter' || c.type === 'stop') && c.state === 'playing') {
+           updated = { ...updated, state: 'stopped' };
+         }
+         if (targetIdsToStop.includes(c.id) && c.state === 'playing') {
+           updated = { ...updated, state: c.fadeTime > 0 ? 'stopping' : 'stopped' };
+         }
+         return updated;
+      }));
+
       actionCues.forEach(ac => { if (ac.endBehavior === 'auto-follow') setTimeout(() => triggerNextCueAfter(ac.id), 0); });
     }
-  }, [cues]); 
+  }, [cues, triggerNextCueAfter, evaluateCue]); 
+
+  const handleStopAll = useCallback(() => { setCues(prev => prev.map(cue => ({ ...cue, state: 'stopped' }))); setIsPaused(false); }, []);
+  const stopCue = (id) => { setCues(prev => prev.map(cue => { if (cue.id === id) return { ...cue, state: cue.state === 'playing' && cue.fadeTime > 0 ? 'stopping' : 'stopped' }; return cue; })); };
+
+  const handleCueEnded = useCallback((endedCueId) => {
+    setCues(prev => {
+      const endedCue = prev.find(c => c.id === endedCueId);
+      let nextState = prev.map(cue => cue.id === endedCueId ? { ...cue, state: 'stopped' } : cue);
+      if (endedCue && endedCue.endBehavior === 'auto-follow') setTimeout(() => triggerNextCueAfter(endedCueId), 0);
+      return nextState;
+    });
+  }, [triggerNextCueAfter]);
+
+  // --- TIME CUE CLOCK ENGINE ---
+  useEffect(() => {
+    const timeCues = cues.filter(c => c.type === 'time' && c.state === 'playing');
+    if (timeCues.length === 0) return;
+
+    const interval = setInterval(() => {
+      const now = new Date();
+      timeCues.forEach(cue => {
+        if (!cue.scheduleTime) return;
+        const target = new Date();
+        const [hours, minutes] = cue.scheduleTime.split(':');
+        target.setHours(parseInt(hours, 10) || 0, parseInt(minutes, 10) || 0, 0, 0);
+        
+        if (cue.scheduleDate) {
+          const [year, month, day] = cue.scheduleDate.split('-');
+          target.setFullYear(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
+        }
+
+        if (now >= target) handleCueEnded(cue.id);
+      });
+    }, 500); 
+    
+    return () => clearInterval(interval);
+  }, [cues, handleCueEnded]);
+
 
   useEffect(() => {
     if (!isProjector && navigator.mediaDevices) {
@@ -407,15 +636,12 @@ export default function App() {
     }
   }, [isProjector]);
 
-  // BUGFIX: Split LocalStorage sync into two parts to prevent cyclic re-rendering
-  // 1. Controller Mode: Send State
   useEffect(() => {
     if (!isProjector) {
       localStorage.setItem('mapper_state', JSON.stringify({ cues, pins, gridSize, isPaused }));
     }
   }, [cues, pins, gridSize, isPaused, isProjector]);
 
-  // 2. Projector Mode: Receive State
   useEffect(() => {
     if (isProjector) {
       const handleStorage = (e) => {
@@ -430,7 +656,6 @@ export default function App() {
         }
       };
       window.addEventListener('storage', handleStorage);
-      
       const initial = localStorage.getItem('mapper_state');
       if (initial) {
         try {
@@ -471,18 +696,18 @@ export default function App() {
     cues.forEach(cue => {
       const trackKey = cue.id;
       const lastState = fadeStateTrackers.current[trackKey]?.state;
-      const el = document.getElementById(`master-${cue.type === 'audio' ? 'aud' : (cue.type === 'image' ? 'img' : 'vid')}-${cue.id}`);
+      const el = document.getElementById(`master-${cue.type === 'audio' ? 'aud' : (cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : 'vid'))}-${cue.id}`);
 
       if (cue.state === 'playing' && lastState !== 'playing') {
           fadeStateTrackers.current[trackKey] = { state: 'playing', start: performance.now(), duration: cue.fadeTime || 0 };
-          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter') {
+          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text') {
               if (cue.fadeTime > 0) doVolumeFade(el, 0, cue.volume !== undefined ? cue.volume : 1, cue.fadeTime);
               else el.volume = cue.volume !== undefined ? cue.volume : 1;
           }
       } 
       else if (cue.state === 'stopping' && lastState !== 'stopping') {
           fadeStateTrackers.current[trackKey] = { state: 'stopping', start: performance.now(), duration: cue.fadeTime || 0 };
-          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter') {
+          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text') {
               if (cue.fadeTime > 0) doVolumeFade(el, el.volume, 0, cue.fadeTime);
           }
           if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]);
@@ -512,14 +737,18 @@ export default function App() {
       if (layerCanvas.width !== stageSize.w) layerCanvas.width = Math.max(1, stageSize.w);
       if (layerCanvas.height !== stageSize.h) layerCanvas.height = Math.max(1, stageSize.h);
 
-      const masterCtx = masterCanvas.getContext('2d', { alpha: true });
-      const layerCtx = layerCanvas.getContext('2d', { alpha: true });
-      masterCtx.clearRect(0, 0, stageSize.w, stageSize.h);
+      // --- CANVAS OPTIMIZATIONS APPLIED HERE ---
+      const masterCtx = masterCanvas.getContext('2d', { alpha: false, desynchronized: true, willReadFrequently: true });
+      const layerCtx = layerCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+      
+      // Paint the base black to prevent ghosting since alpha is false
+      masterCtx.fillStyle = '#000000';
+      masterCtx.fillRect(0, 0, stageSize.w, stageSize.h);
 
       const currentCues = cuesRef.current.filter(c => c.state === 'playing' || c.state === 'stopping');
       
       currentCues.forEach(cue => {
-        if (cue.type === 'audio' || cue.type === 'goto' || cue.type === 'pause' || cue.type === 'counter') return;
+        if (cue.type === 'audio' || cue.type === 'goto' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time') return;
 
         let opacity = 1;
         const tracker = fadeStateTrackers.current[cue.id];
@@ -536,7 +765,7 @@ export default function App() {
            return;
         }
 
-        const mediaEl = document.getElementById(`master-${cue.type === 'image' ? 'img' : 'vid'}-${cue.id}`);
+        const mediaEl = document.getElementById(`master-${cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : 'vid')}-${cue.id}`);
         if (!mediaEl) return;
         if (mediaEl instanceof HTMLVideoElement && mediaEl.readyState < 2) return;
 
@@ -581,25 +810,52 @@ export default function App() {
   }, [stageSize, gridSize, isProjector]);
 
   useEffect(() => {
+    cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => {
+      if (cue.type === 'image' || cue.type === 'goto' || cue.type === 'camera' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time' || cue.type === 'text') return;
+      const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`);
+      if (el) { if (isPaused) el.pause(); else el.play().catch(e => console.log("Auto-play prevented", e)); }
+    });
+  }, [isPaused, cues]);
+
+  const handleMediaTimeUpdate = useCallback((id, target) => {
+    const current = Math.floor(target.currentTime) || 0; const duration = isNaN(target.duration) || !isFinite(target.duration) ? 0 : Math.floor(target.duration);
+    setMediaTimes(prev => prev[id]?.current === current && prev[id]?.duration === duration ? prev : { ...prev, [id]: { current, duration } });
+  }, []);
+
+  useEffect(() => {
+    if (isProjector) return; 
+    cues.forEach(cue => {
+      if (cue.state === 'playing' && cue.autoAdvance && cue.advanceTime > 0 && !isPaused) {
+        if (!advanceTimers.current[cue.id]) advanceTimers.current[cue.id] = setTimeout(() => { triggerNextCueAfter(cue.id); }, cue.advanceTime * 1000); 
+      } else if (advanceTimers.current[cue.id]) { clearTimeout(advanceTimers.current[cue.id]); delete advanceTimers.current[cue.id]; }
+    });
+  }, [cues, isProjector, triggerNextCueAfter, isPaused]);
+
+  useEffect(() => {
     cues.forEach(cue => {
       const probeKey = `${cue.id}-${cue.url}`;
-      if (!probedCues.current.has(probeKey) && cue.url && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter') {
-        probedCues.current.add(probeKey);
-        if (cue.type === 'image') {
-          const img = new window.Image();
-          img.onload = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: `${img.naturalWidth}x${img.naturalHeight}`, status: 'Loaded' } }));
-          img.onerror = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: 'Error', status: 'Error' } }));
-          img.src = cue.url;
-        } else if (cue.type === 'video') {
-          const vid = document.createElement('video');
-          vid.onloadedmetadata = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: `${vid.videoWidth}x${vid.videoHeight}`, duration: vid.duration, status: 'Loaded' } }));
-          vid.onerror = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: 'Error', duration: 0, status: 'Error' } }));
-          vid.src = cue.url;
-        } else if (cue.type === 'audio') {
-          const aud = document.createElement('audio');
-          aud.onloadedmetadata = () => setMetadata(prev => ({ ...prev, [cue.id]: { duration: aud.duration, status: 'Loaded' } }));
-          aud.onerror = () => setMetadata(prev => ({ ...prev, [cue.id]: { duration: 0, status: 'Error' } }));
-          aud.src = cue.url;
+      if (!probedCues.current.has(probeKey) && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time') {
+        if (cue.type === 'text') {
+          probedCues.current.add(probeKey);
+          setMetadata(prev => ({ ...prev, [cue.id]: { resolution: `1920x1080`, status: 'Loaded' } }));
+        } else if (cue.url) {
+          probedCues.current.add(probeKey);
+          if (cue.type === 'image') {
+            const img = new window.Image();
+            img.onload = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: `${img.naturalWidth}x${img.naturalHeight}`, status: 'Loaded' } }));
+            img.onerror = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: 'Error', status: 'Error' } }));
+            img.src = cue.url;
+          } else if (cue.type === 'video') {
+            const vid = document.createElement('video');
+            vid.onloadedmetadata = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: `${vid.videoWidth}x${vid.videoHeight}`, duration: vid.duration, status: 'Loaded' } }));
+            vid.onerror = () => setMetadata(prev => ({ ...prev, [cue.id]: { resolution: 'Error', duration: 0, status: 'Error' } }));
+            vid.src = cue.url;
+          } else if (cue.type === 'audio') {
+            const aud = document.createElement('audio');
+            aud.onloadedmetadata = () => setMetadata(prev => ({ ...prev, [cue.id]: { duration: aud.duration, status: 'Loaded' } }));
+            aud.onerror = () => setMetadata(prev => ({ ...prev, [cue.id]: { duration: 0, status: 'Error' } }));
+            aud.src = cue.url;
+          }
         }
       }
     });
@@ -618,7 +874,7 @@ export default function App() {
       try {
         const loadedState = JSON.parse(event.target.result);
         if (loadedState.cues) { 
-          const hydratedCues = loadedState.cues.map(c => ({ ...c, cameraLive: c.cameraLive ?? true, maskEnabled: c.maskEnabled ?? false, maskDataUrl: c.maskDataUrl ?? null, counterLimit: c.counterLimit ?? 1, counterCurrent: c.counterCurrent ?? 0, gotoMode: c.gotoMode || 'specific', targetCueRangeMin: c.targetCueRangeMin || '', targetCueRangeMax: c.targetCueRangeMax || '' }));
+          const hydratedCues = loadedState.cues.map(c => ({ ...c, groupId: c.groupId ?? null, groupMode: c.groupMode || 'fire-all', isExpanded: c.isExpanded ?? true, cameraLive: c.cameraLive ?? true, maskEnabled: c.maskEnabled ?? false, maskDataUrl: c.maskDataUrl ?? null, counterLimit: c.counterLimit ?? 1, counterCurrent: c.counterCurrent ?? 0, gotoMode: c.gotoMode || 'specific', targetCueRangeMin: c.targetCueRangeMin || '', targetCueRangeMax: c.targetCueRangeMax || '', scheduleDate: c.scheduleDate || '', scheduleTime: c.scheduleTime || '', textContent: c.textContent || '', textColor: c.textColor || '#ffffff', textScale: c.textScale || 100 }));
           setCues(hydratedCues); 
           if (hydratedCues.length > 0) { setSelectedCueIds([hydratedCues[0].id]); setLastSelectedId(hydratedCues[0].id); }
         }
@@ -637,7 +893,7 @@ export default function App() {
       let type = 'video'; const name = file.name.toLowerCase();
       if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg')) type = 'audio';
       else if (file.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg')) type = 'image';
-      return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: type === 'image' ? 'none' : 'auto-follow', fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '' };
+      return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: type === 'image' ? 'none' : 'auto-follow', fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 };
     });
     if (newCues.length > 0) { setCues(prev => { const updated = [...prev, ...newCues]; return updated.map((c, i) => ({ ...c, number: (i + 1).toString() })); }); }
     e.target.value = ''; 
@@ -681,6 +937,17 @@ export default function App() {
     } 
   };
 
+  const handleScanNetwork = () => {
+    try {
+      setNetworkStreams([
+        { name: 'OMT Test Pattern Generator', url: 'omt://localhost:9999/test' },
+        { name: 'Studio Camera 1 (RTSP)', url: 'rtsp://192.168.1.55:554/live' }
+      ]);
+    } catch (e) {
+      console.log("No electron backend available for network scanning.");
+    }
+  };
+
   useEffect(() => {
     const observer = new ResizeObserver(entries => { if (entries[0]) setStageSize({ w: entries[0].contentRect.width, h: entries[0].contentRect.height }); });
     if (stageRef.current) observer.observe(stageRef.current);
@@ -707,129 +974,55 @@ export default function App() {
     }
   };
 
-  const handleGo = useCallback(() => {
-    if (selectedCueIds.length === 0) return;
-    setIsPaused(false); 
-    setCues(prev => {
-      let nextState = [...prev]; const resolvedCues = []; const mutations = {};
-      const evaluateCue = (cueId, depth = 0) => {
-        if (depth > 10) return null; const cue = prev.find(c => c.id === cueId); if (!cue) return null;
-        if (cue.type === 'goto') {
-          if (cue.gotoMode === 'random') {
-             const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
-             if (!isNaN(val1) && !isNaN(val2)) {
-                const validCues = prev.filter(c => { const num = parseFloat(c.number); return !isNaN(num) && num >= Math.min(val1, val2) && num <= Math.max(val1, val2); });
-                if (validCues.length > 0) return evaluateCue(validCues[Math.floor(Math.random() * validCues.length)].id, depth + 1);
-             } return null;
-          } else { const target = prev.find(c => String(c.number) === String(cue.targetCueNumber)); return target ? evaluateCue(target.id, depth + 1) : null; }
-        }
-        if (cue.type === 'counter') {
-          const current = (mutations[cue.id]?.counterCurrent ?? cue.counterCurrent) || 0;
-          if (current + 1 >= (cue.counterLimit || 1)) {
-             mutations[cue.id] = { counterCurrent: 0 }; const target = prev.find(c => String(c.number) === String(cue.targetCueNumber)); return target ? evaluateCue(target.id, depth + 1) : null;
-          } else { mutations[cue.id] = { counterCurrent: current + 1 }; return cue; }
-        } return cue;
-      };
-      selectedCueIds.forEach(id => { const targetCue = evaluateCue(id); if (targetCue) resolvedCues.push(targetCue); });
-      const resolvedIds = resolvedCues.map(c => c.id);
-      if (resolvedIds.length === 0 && Object.keys(mutations).length === 0) return prev; 
-      const hasHardStop = resolvedCues.some(c => c.triggerBehavior === 'stop-others');
-      nextState = nextState.map(cue => {
-        let updatedCue = { ...cue, ...(mutations[cue.id] || {}) };
-        if (resolvedIds.includes(cue.id)) return { ...updatedCue, state: 'playing' };
-        if (hasHardStop && !resolvedIds.includes(cue.id) && cue.state === 'playing') return cue.fadeTime > 0 ? { ...updatedCue, state: 'stopping' } : { ...updatedCue, state: 'stopped' };
-        return updatedCue;
-      });
-      const lastTargetIndex = Math.max(...resolvedIds.map(id => prev.findIndex(c => c.id === id)));
-      if (lastTargetIndex >= 0 && lastTargetIndex < prev.length - 1) { const nextSelectionId = prev[lastTargetIndex + 1].id; setTimeout(() => { setSelectedCueIds([nextSelectionId]); setLastSelectedId(nextSelectionId); scrollCueIntoView(nextSelectionId); }, 0); } 
-      else if (lastTargetIndex === prev.length - 1) { const currentSelectionId = prev[lastTargetIndex].id; setTimeout(() => { setSelectedCueIds([currentSelectionId]); setLastSelectedId(currentSelectionId); scrollCueIntoView(currentSelectionId); }, 0); }
-      return nextState;
-    });
-  }, [selectedCueIds, scrollCueIntoView]);
-
-  const handleStopAll = useCallback(() => { setCues(prev => prev.map(cue => ({ ...cue, state: 'stopped' }))); setIsPaused(false); }, []);
-
-  const stopCue = (id) => { setCues(prev => prev.map(cue => { if (cue.id === id) return { ...cue, state: cue.state === 'playing' && cue.fadeTime > 0 ? 'stopping' : 'stopped' }; return cue; })); };
-
-  const triggerNextCueAfter = useCallback((currentCueId) => {
-    setCues(prev => {
-       const currentIndex = prev.findIndex(c => c.id === currentCueId);
-       if (currentIndex >= 0 && currentIndex < prev.length - 1) {
-          const nextCueRaw = prev[currentIndex + 1]; const mutations = {};
-          const evaluateCue = (cueId, depth = 0) => {
-            if (depth > 10) return null; const cue = prev.find(c => c.id === cueId); if (!cue) return null;
-            if (cue.type === 'goto') {
-              if (cue.gotoMode === 'random') {
-                 const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
-                 if (!isNaN(val1) && !isNaN(val2)) {
-                    const validCues = prev.filter(c => { const num = parseFloat(c.number); return !isNaN(num) && num >= Math.min(val1, val2) && num <= Math.max(val1, val2); });
-                    if (validCues.length > 0) return evaluateCue(validCues[Math.floor(Math.random() * validCues.length)].id, depth + 1);
-                 } return null;
-              } else { const target = prev.find(c => String(c.number) === String(cue.targetCueNumber)); return target ? evaluateCue(target.id, depth + 1) : null; }
-            }
-            if (cue.type === 'counter') {
-              const current = (mutations[cue.id]?.counterCurrent ?? cue.counterCurrent) || 0;
-              if (current + 1 >= (cue.counterLimit || 1)) { mutations[cue.id] = { counterCurrent: 0 }; const target = prev.find(c => String(c.number) === String(cue.targetCueNumber)); return target ? evaluateCue(target.id, depth + 1) : null; } 
-              else { mutations[cue.id] = { counterCurrent: current + 1 }; return cue; }
-            } return cue;
-          };
-          const nextCue = evaluateCue(nextCueRaw.id);
-          if (!nextCue && Object.keys(mutations).length === 0) return prev; 
-          let nextState = prev.map(cue => mutations[cue.id] ? { ...cue, ...mutations[cue.id] } : cue);
-          if (nextCue) {
-            if (nextCue.triggerBehavior === 'stop-others') nextState = nextState.map(c => c.id !== nextCue.id && c.state === 'playing' ? { ...c, state: c.fadeTime > 0 ? 'stopping' : 'stopped' } : c);
-            nextState = nextState.map(c => c.id === nextCue.id ? { ...c, state: 'playing' } : c);
-            setTimeout(() => { setSelectedCueIds(prevSelected => { if (prevSelected.length === 1 && prevSelected[0] === nextCueRaw.id) { const targetIndex = prev.findIndex(c => c.id === nextCueRaw.id); if (targetIndex >= 0 && targetIndex < prev.length - 1) { const pushedId = prev[targetIndex + 1].id; setLastSelectedId(pushedId); scrollCueIntoView(pushedId); return [pushedId]; } } return prevSelected; }); }, 0);
-          } return nextState;
-       } return prev;
-    });
-  }, [scrollCueIntoView]);
-
-  const handleCueEnded = useCallback((endedCueId) => {
-    setCues(prev => {
-      const endedCue = prev.find(c => c.id === endedCueId);
-      let nextState = prev.map(cue => cue.id === endedCueId ? { ...cue, state: 'stopped' } : cue);
-      if (endedCue && endedCue.endBehavior === 'auto-follow') setTimeout(() => triggerNextCueAfter(endedCueId), 0);
-      return nextState;
-    });
-  }, [triggerNextCueAfter]);
-
-  useEffect(() => {
-    cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => {
-      if (cue.type === 'image' || cue.type === 'goto' || cue.type === 'camera' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter') return;
-      const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`);
-      if (el) { if (isPaused) el.pause(); else el.play().catch(e => console.log("Auto-play prevented", e)); }
-    });
-  }, [isPaused, cues]);
-
-  const handleMediaTimeUpdate = useCallback((id, target) => {
-    const current = Math.floor(target.currentTime) || 0; const duration = isNaN(target.duration) || !isFinite(target.duration) ? 0 : Math.floor(target.duration);
-    setMediaTimes(prev => prev[id]?.current === current && prev[id]?.duration === duration ? prev : { ...prev, [id]: { current, duration } });
-  }, []);
-
-  useEffect(() => {
-    if (isProjector) return; 
-    cues.forEach(cue => {
-      if (cue.state === 'playing' && cue.autoAdvance && cue.advanceTime > 0 && !isPaused) {
-        if (!advanceTimers.current[cue.id]) advanceTimers.current[cue.id] = setTimeout(() => { triggerNextCueAfter(cue.id); }, cue.advanceTime * 1000); 
-      } else if (advanceTimers.current[cue.id]) { clearTimeout(advanceTimers.current[cue.id]); delete advanceTimers.current[cue.id]; }
-    });
-  }, [cues, isProjector, triggerNextCueAfter, isPaused]);
-
   const handleDragStart = (e, id) => { setDraggedCueId(id); e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('opacity-50'), 0); };
   const handleDragOver = (e, id) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverCueId !== id) setDragOverCueId(id); };
   const handleDragLeave = (e, id) => { if (dragOverCueId === id) setDragOverCueId(null); };
   const handleDrop = (e, dropTargetId) => {
     e.preventDefault(); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) return; e.stopPropagation(); 
     if (!draggedCueId || draggedCueId === dropTargetId) { setDraggedCueId(null); setDragOverCueId(null); return; }
+    
     setCues(prevCues => {
-      const draggedIndex = prevCues.findIndex(c => c.id === draggedCueId); const dropIndex = prevCues.findIndex(c => c.id === dropTargetId);
-      const newCues = [...prevCues]; const [draggedItem] = newCues.splice(draggedIndex, 1); newCues.splice(dropIndex, 0, draggedItem);
+      const draggedIndex = prevCues.findIndex(c => c.id === draggedCueId); 
+      const dropIndex = prevCues.findIndex(c => c.id === dropTargetId);
+      if (draggedIndex === dropIndex) return prevCues;
+
+      const newCues = [...prevCues]; 
+      const [draggedItem] = newCues.splice(draggedIndex, 1); 
+      
+      const newDropIndex = newCues.findIndex(c => c.id === dropTargetId);
+      const dropTarget = newCues[newDropIndex];
+      
+      if (dropTarget.type === 'group') {
+          draggedItem.groupId = dropTarget.id;
+          newCues.splice(newDropIndex + 1, 0, draggedItem);
+      } else {
+          draggedItem.groupId = dropTarget.groupId;
+          newCues.splice(newDropIndex, 0, draggedItem);
+      }
       return newCues.map((cue, index) => ({ ...cue, number: (index + 1).toString() }));
     });
     setDraggedCueId(null); setDragOverCueId(null);
   };
   const handleDragEnd = (e) => { e.target.classList.remove('opacity-50'); setDraggedCueId(null); setDragOverCueId(null); };
+
+  const handleGroupChange = (cueId, newGroupId) => {
+     setCues(prev => {
+        const newCues = [...prev];
+        const cueIndex = newCues.findIndex(c => c.id === cueId);
+        const [cue] = newCues.splice(cueIndex, 1);
+        cue.groupId = newGroupId || null;
+
+        if (newGroupId) {
+           const groupIndex = newCues.findIndex(c => c.id === newGroupId);
+           let insertIndex = groupIndex + 1;
+           while(insertIndex < newCues.length && newCues[insertIndex].groupId === newGroupId) insertIndex++;
+           newCues.splice(insertIndex, 0, cue);
+        } else {
+           newCues.push(cue);
+        }
+        return newCues.map((c, i) => ({ ...c, number: (i+1).toString() }));
+     });
+  };
 
   const handlePinDrag = (index, e) => {
     if (!stageRef.current) return;
@@ -851,7 +1044,8 @@ export default function App() {
   const masterMediaPlayers = (
     <div style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: -999 }}>
       {activeMediaCues.map(cue => {
-        if (cue.type === 'goto' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter') return null;
+        if (cue.type === 'goto' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time') return null;
+        if (cue.type === 'text') return <TextMasterPlayer key={`master-text-${cue.id}`} cue={cue} />;
         if (cue.type === 'image') return <img key={`master-img-${cue.id}`} id={`master-img-${cue.id}`} src={cue.url} />;
         if (cue.type === 'camera') return <CameraMasterPlayer key={`master-cam-${cue.id}`} cue={cue} isPaused={isPaused} />;
         return cue.type === 'video' ? (
@@ -878,12 +1072,16 @@ export default function App() {
   const hasImage = activeCues.some(c => c.type === 'image');
   const hasGoto = activeCues.some(c => c.type === 'goto');
   const hasCounter = activeCues.some(c => c.type === 'counter');
+  const hasStop = activeCues.some(c => c.type === 'stop');
+  const hasGroup = activeCues.some(c => c.type === 'group');
+  const hasTime = activeCues.some(c => c.type === 'time');
+  const hasText = activeCues.some(c => c.type === 'text');
   const hasCamera = activeCues.some(c => c.type === 'camera');
   const hasPause = activeCues.some(c => c.type === 'pause');
   const hasBlackout = activeCues.some(c => c.type === 'blackout');
   const hasFileMedia = activeCues.some(c => c.type === 'video' || c.type === 'audio' || c.type === 'image');
   const isOnlyBlackout = activeCues.length > 0 && activeCues.every(c => c.type === 'blackout');
-  const isOnlyControl = activeCues.length > 0 && activeCues.every(c => c.type === 'goto' || c.type === 'pause' || c.type === 'counter');
+  const isOnlyControl = activeCues.length > 0 && activeCues.every(c => c.type === 'goto' || c.type === 'pause' || c.type === 'counter' || c.type === 'stop' || c.type === 'group' || c.type === 'time');
   
   const getSharedVal = (field, fallback = '') => {
     if (activeCues.length === 0) return fallback; const val = activeCues[0][field];
@@ -894,6 +1092,20 @@ export default function App() {
 
   const selectedDisplayNumbers = cues.filter(c => selectedCueIds.includes(c.id)).map(c => c.number).join(', ');
   const activeDisplayNumbers = cues.filter(c => c.state === 'playing' || c.state === 'stopping').map(c => c.number).join(', ');
+
+  const isVisible = useCallback((cueId) => {
+      const cue = cues.find(c => c.id === cueId);
+      if (!cue || !cue.groupId) return true;
+      const parent = cues.find(c => c.id === cue.groupId);
+      if (parent && !parent.isExpanded) return false;
+      return isVisible(parent.id);
+  }, [cues]);
+
+  const getIndent = useCallback((cueId, depth = 0) => {
+      const cue = cues.find(c => c.id === cueId);
+      if (!cue || !cue.groupId) return depth;
+      return getIndent(cue.groupId, depth + 1);
+  }, [cues]);
 
   // =========================================================================
   // RENDER: PROJECTOR MODE 
@@ -1021,6 +1233,10 @@ export default function App() {
 
            <button onClick={() => setIsMappingMode(!isMappingMode)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-semibold transition-colors ${isMappingMode ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}><Crosshair className="w-4 h-4" /> {isMappingMode ? 'Exit Mapping' : 'Map Surface'}</button>
            
+           <button onClick={() => setIsBroadcasting(!isBroadcasting)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-semibold transition-colors ${isBroadcasting ? 'bg-orange-600 text-white shadow-[0_0_15px_rgba(234,88,12,0.5)] animate-pulse' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+             <Radio className="w-4 h-4" /> {isBroadcasting ? 'OMT LIVE' : 'Broadcast OMT'}
+           </button>
+
            <button onClick={toggleProjectorWindow} className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-semibold transition-colors ${projectorActive ? 'bg-red-900 hover:bg-red-800 text-red-100' : 'bg-green-900 hover:bg-green-800 text-green-100'}`}>
              {projectorActive ? <MonitorDown className="w-4 h-4" /> : <MonitorUp className="w-4 h-4" />} 
              {projectorActive ? 'Close Projector Screen' : 'Open Projector Screen'}
@@ -1052,7 +1268,7 @@ export default function App() {
                 return {
                   id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url, state: 'stopped',
                   loop: false, triggerBehavior: 'stop-others', endBehavior: type === 'image' ? 'none' : 'auto-follow',
-                  fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: ''
+                  fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100
                 };
               });
               setCues(prev => {
@@ -1075,7 +1291,7 @@ export default function App() {
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Cue List</div>
                 <div className="flex gap-1">
                   <button onClick={() => folderInputRef.current?.click()} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="Add Folder"><FolderPlus className="w-4 h-4" /></button>
-                  <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', url: MEDIA.video1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '' }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', url: MEDIA.video1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: 'NEW TITLE', textColor: '#ffffff', textScale: 100 }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
                   <button onClick={() => { const remaining = cues.filter(c => !selectedCueIds.includes(c.id)); setCues(remaining); setSelectedCueIds(remaining.length > 0 ? [remaining[0].id] : []); setLastSelectedId(remaining.length > 0 ? remaining[0].id : null); }} className="p-1 hover:bg-red-900/50 rounded text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
                 </div>
              </div>
@@ -1093,27 +1309,46 @@ export default function App() {
           
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             {cues.map((cue) => {
+              if (!isVisible(cue.id)) return null;
+
               const isSelected = selectedCueIds.includes(cue.id);
               const isPlaying = cue.state === 'playing';
               const isStopping = cue.state === 'stopping';
               const times = mediaTimes[cue.id];
+              const indentLevel = getIndent(cue.id);
 
               return (
                 <div key={cue.id} data-cue-id={cue.id} onClick={(e) => handleCueClick(e, cue.id)} draggable="true"
                   onDragStart={(e) => handleDragStart(e, cue.id)} onDragOver={(e) => handleDragOver(e, cue.id)} onDragLeave={(e) => handleDragLeave(e, cue.id)} onDrop={(e) => handleDrop(e, cue.id)} onDragEnd={handleDragEnd}
-                  className={`flex items-center px-2 py-3 text-sm border-b cursor-pointer select-none transition-colors ${dragOverCueId === cue.id ? 'border-t-2 border-t-blue-500 bg-gray-800/80' : 'border-b-gray-800/50'} ${isSelected ? 'bg-blue-900/40 border-blue-800/50' : 'hover:bg-gray-800/50'} ${isPlaying ? 'text-green-400' : isStopping ? 'text-yellow-500' : 'text-gray-300'}`}
+                  className={`flex items-center px-2 py-3 text-sm border-b cursor-pointer select-none transition-colors 
+                    ${dragOverCueId === cue.id ? 'border-t-2 border-t-blue-500 bg-gray-800/80' : 'border-b-gray-800/50'} 
+                    ${isSelected ? 'bg-blue-900/40 border-blue-800/50' : 'hover:bg-gray-800/50'} 
+                    ${isPlaying ? 'text-green-400' : isStopping ? 'text-yellow-500' : 'text-gray-300'}
+                    ${cue.groupId ? 'border-l-2 border-l-gray-700 rounded-l-none bg-gray-950/30' : ''}`}
+                  style={{ marginLeft: `${indentLevel * 24}px` }}
                 >
                   <div className="w-6 flex justify-center text-gray-600 cursor-grab active:cursor-grabbing hover:text-gray-400"><GripVertical className="w-4 h-4" /></div>
-                  <div className="w-6 flex justify-center">{isSelected && <ChevronRight className="w-4 h-4 text-blue-400" />}</div>
+                  <div className="w-6 flex justify-center">
+                     {cue.type === 'group' ? (
+                       <button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, isExpanded: !c.isExpanded} : c)); }} className="hover:text-white">
+                         {cue.isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                       </button>
+                     ) : (
+                       isSelected && <ChevronRight className="w-4 h-4 text-blue-400" />
+                     )}
+                  </div>
                   <div className="w-8 font-mono opacity-50">{cue.number}</div>
                   <div className="w-10 flex items-center justify-center gap-1">
-                    {cue.type === 'video' ? <Video className="w-4 h-4" /> : cue.type === 'image' ? <ImageIcon className="w-4 h-4" /> : cue.type === 'audio' ? <Music className="w-4 h-4" /> : cue.type === 'camera' ? <Camera className="w-4 h-4" /> : cue.type === 'blackout' ? <Moon className="w-4 h-4" /> : cue.type === 'pause' ? <PauseCircle className="w-4 h-4" /> : cue.type === 'counter' ? <Repeat className="w-4 h-4" /> : <CornerDownRight className="w-4 h-4 text-blue-400" />}
-                    {cue.type !== 'goto' && cue.type !== 'pause' && cue.type !== 'counter' && (cue.triggerBehavior === 'stop-others' ? <span title="Stops active cues" className="cursor-help"><StopCircle className="w-3 h-3 text-red-500 opacity-60" /></span> : <span title="Overlaps" className="cursor-help"><Layers className="w-3 h-3 text-blue-500 opacity-60" /></span>)}
+                    {cue.type === 'video' ? <Video className="w-4 h-4" /> : cue.type === 'image' ? <ImageIcon className="w-4 h-4" /> : cue.type === 'audio' ? <Music className="w-4 h-4" /> : cue.type === 'camera' ? <Camera className="w-4 h-4" /> : cue.type === 'blackout' ? <Moon className="w-4 h-4" /> : cue.type === 'pause' ? <PauseCircle className="w-4 h-4" /> : cue.type === 'counter' ? <Repeat className="w-4 h-4" /> : cue.type === 'stop' ? <XSquare className="w-4 h-4 text-red-500" /> : cue.type === 'group' ? (cue.isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />) : cue.type === 'time' ? <CalendarClock className="w-4 h-4 text-orange-400" /> : cue.type === 'text' ? <Type className="w-4 h-4 text-yellow-200" /> : <CornerDownRight className="w-4 h-4 text-blue-400" />}
+                    {cue.type !== 'goto' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && (cue.triggerBehavior === 'stop-others' ? <span title="Stops active cues" className="cursor-help"><StopCircle className="w-3 h-3 text-red-500 opacity-60" /></span> : <span title="Overlaps" className="cursor-help"><Layers className="w-3 h-3 text-blue-500 opacity-60" /></span>)}
                   </div>
                   
                   <div className="flex-1 flex items-center font-medium truncate pr-2">
-                    {cue.name}
+                    <span className={cue.type === 'group' ? 'font-bold text-blue-100' : ''}>{cue.name}</span>
                     {cue.type === 'counter' && <span className="ml-2 text-xs text-purple-400 font-mono tracking-widest bg-purple-900/40 px-1.5 py-0.5 rounded border border-purple-800/50">({cue.counterCurrent || 0}/{cue.counterLimit || 1}) ➔ CUE {cue.targetCueNumber || '?'}</span>}
+                    {cue.type === 'stop' && <span className="ml-2 text-xs text-red-400 font-mono tracking-widest bg-red-900/40 px-1.5 py-0.5 rounded border border-red-800/50">➔ STOP CUE {cue.targetCueNumber || '?'}</span>}
+                    {cue.type === 'time' && <span className="ml-2 text-[10px] text-orange-400 font-mono tracking-widest bg-orange-900/40 px-1.5 py-0.5 rounded border border-orange-800/50">➔ WAITS UNTIL {cue.scheduleDate || 'TODAY'} @ {cue.scheduleTime || '??:??'}</span>}
+                    {cue.type === 'group' && <span className="ml-2 text-[10px] text-gray-500 font-mono uppercase border border-gray-700 px-1.5 rounded">{cue.groupMode === 'fire-all' ? 'Fire All' : 'Fire First'}</span>}
                     {cue.maskEnabled && <span title="Transparency Mask Active" className="ml-2 flex-shrink-0 cursor-help"><Crop className="w-3 h-3 text-blue-500" /></span>}
                     {cue.type === 'camera' && (<button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, cameraLive: !c.cameraLive} : c)); }} className={`ml-3 px-2 py-0.5 rounded shadow flex items-center gap-1 text-[9px] font-bold tracking-wider border transition-colors ${cue.cameraLive ? 'bg-green-900/40 border-green-500 text-green-400 hover:bg-green-800/60' : 'bg-red-900/40 border-red-500 text-red-400 hover:bg-red-800/60'}`}><div className={`w-1.5 h-1.5 rounded-full ${cue.cameraLive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />{cue.cameraLive ? 'LIVE' : 'CUT'}</button>)}
                     {cue.type === 'goto' && (
@@ -1122,19 +1357,19 @@ export default function App() {
                       </span>
                     )}
                     {cue.notes && <span title={`Note: ${cue.notes}`} className="ml-2 flex-shrink-0 cursor-help"><FileText className="w-3 h-3 text-gray-500" /></span>}
-                    {cue.endBehavior === 'auto-follow' && cue.type !== 'goto' && <span title="Auto-follows" className="ml-2 flex-shrink-0 cursor-help"><ArrowRight className="w-3 h-3 text-green-500" /></span>}
-                    {cue.autoAdvance && cue.type !== 'goto' && <span title="Auto-advance" className="ml-2 flex-shrink-0 cursor-help"><Clock className="w-3 h-3 text-yellow-500" /></span>}
+                    {cue.endBehavior === 'auto-follow' && cue.type !== 'goto' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && <span title="Auto-follows" className="ml-2 flex-shrink-0 cursor-help"><ArrowRight className="w-3 h-3 text-green-500" /></span>}
+                    {cue.autoAdvance && cue.type !== 'goto' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && <span title="Auto-advance" className="ml-2 flex-shrink-0 cursor-help"><Clock className="w-3 h-3 text-yellow-500" /></span>}
                     <AudioVisualizer isPlaying={isPlaying || isStopping} isPaused={isPaused} type={cue.type} />
                   </div>
 
-                  {(isPlaying || isStopping) && times && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && (
+                  {(isPlaying || isStopping) && times && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text' && (
                     <div className="flex items-center text-[11px] font-mono px-3 whitespace-nowrap text-gray-400">
                       <span className="text-blue-400">{formatTime(times.current)}</span><span className="mx-1.5 opacity-50">/</span><span>{formatTime(times.duration)}</span>
                       <span className="ml-1.5 text-gray-500">(-{formatTime(times.duration - times.current)})</span>
                     </div>
                   )}
 
-                  <div className="w-12 flex justify-end">{isPlaying ? <button onClick={(e) => { e.stopPropagation(); stopCue(cue.id); }} className="hover:scale-110" title="Soft Stop"><Play className="w-4 h-4 text-green-500 fill-green-500" /></button> : isStopping ? <button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, state: 'stopped'} : c)); }} className="hover:scale-110" title="Hard Stop"><Square className="w-4 h-4 text-yellow-500 fill-yellow-500 animate-pulse" /></button> : <Square className="w-4 h-4 opacity-30" />}</div>
+                  <div className="w-12 flex justify-end">{(isPlaying && cue.type !== 'group') ? <button onClick={(e) => { e.stopPropagation(); stopCue(cue.id); }} className="hover:scale-110" title="Soft Stop"><Play className="w-4 h-4 text-green-500 fill-green-500" /></button> : (isStopping && cue.type !== 'group') ? <button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, state: 'stopped'} : c)); }} className="hover:scale-110" title="Hard Stop"><Square className="w-4 h-4 text-yellow-500 fill-yellow-500 animate-pulse" /></button> : <Square className="w-4 h-4 opacity-30" />}</div>
                 </div>
               );
             })}
@@ -1159,7 +1394,7 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {activeMediaCues.filter(c => c.type !== 'goto' && c.type !== 'pause' && c.type !== 'counter').length === 0 && <div className="absolute inset-0 flex items-center justify-center text-gray-800 font-mono tracking-widest pointer-events-none uppercase text-xs">Stage Preview</div>}
+              {activeMediaCues.filter(c => c.type !== 'goto' && c.type !== 'pause' && c.type !== 'counter' && c.type !== 'group' && c.type !== 'time').length === 0 && <div className="absolute inset-0 flex items-center justify-center text-gray-800 font-mono tracking-widest pointer-events-none uppercase text-xs">Stage Preview</div>}
               {quads.map((quad, qIdx) => {
                 const pt_tl = { x: pins[quad.indices[0]].x * stageSize.w, y: pins[quad.indices[0]].y * stageSize.h };
                 const pt_tr = { x: pins[quad.indices[1]].x * stageSize.w, y: pins[quad.indices[1]].y * stageSize.h };
@@ -1206,98 +1441,197 @@ export default function App() {
             {activeCues.length > 0 ? (
               <div className="p-4 grid grid-cols-2 gap-6 overflow-y-auto custom-scrollbar">
                 <div className="space-y-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Cue Number & Type</label><div className="flex gap-2"><input type="text" value={isMixed('number') ? '' : getSharedVal('number', '')} placeholder={isMixed('number') ? '<Mixed>' : ''} readOnly className="w-16 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none" /><select value={isMixed('type') ? 'mixed' : getSharedVal('type', 'video')} onChange={(e) => updateSelectedCues('type', e.target.value)} className="flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none">{isMixed('type') && <option value="mixed" disabled>Mixed Types</option>}<option value="video">Video Media</option><option value="audio">Audio Only</option><option value="image">Image Graphic</option><option value="camera">Live Capture</option><option value="blackout">Stage Blackout</option><option value="pause">Pause Show</option><option value="goto">GoTo Pointer</option><option value="counter">Loop Counter</option></select></div></div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Cue Number & Type</label>
+                    <div className="flex gap-2">
+                      <input type="text" value={isMixed('number') ? '' : getSharedVal('number', '')} placeholder={isMixed('number') ? '<Mixed>' : ''} readOnly className="w-16 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none" />
+                      <select value={isMixed('type') ? 'mixed' : getSharedVal('type', 'video')} onChange={(e) => updateSelectedCues('type', e.target.value)} className="flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none">
+                        {isMixed('type') && <option value="mixed" disabled>Mixed Types</option>}
+                        <option value="video">Video Media</option>
+                        <option value="audio">Audio Only</option>
+                        <option value="image">Image Graphic</option>
+                        <option value="camera">Live Capture</option>
+                        <option value="text">Text / Title</option>
+                        <option value="blackout">Stage Blackout</option>
+                        <option value="pause">Pause Show</option>
+                        <option value="goto">GoTo Pointer</option>
+                        <option value="counter">Loop Counter</option>
+                        <option value="stop">Targeted Stop</option>
+                        <option value="time">Time / Scheduled</option>
+                        <option value="group">Group / Folder</option>
+                      </select>
+                    </div>
+                  </div>
                   <div><label className="block text-xs text-gray-500 mb-1">Cue Name</label><input type="text" value={isMixed('name') ? '' : getSharedVal('name', '')} placeholder={isMixed('name') ? '<Multiple Values>' : ''} onChange={(e) => updateSelectedCues('name', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-sm text-gray-100 outline-none" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Tech / Operator Notes</label><textarea value={isMixed('notes') ? '' : getSharedVal('notes', '')} placeholder={isMixed('notes') ? '<Multiple Values>' : 'Directions...'} onChange={(e) => updateSelectedCues('notes', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-300 outline-none resize-none h-16" /></div>
+                  <div className="flex gap-2">
+                    <div className="flex-1"><label className="block text-xs text-gray-500 mb-1">Folder Assignment</label><select value={isMixed('groupId') ? 'mixed' : getSharedVal('groupId', '')} onChange={(e) => handleGroupChange(selectedCueIds[0], e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-300 outline-none">{isMixed('groupId') && <option value="mixed" disabled>Mixed Groups</option>}<option value="">-- Root Level (None) --</option>{cues.filter(c => c.type === 'group' && !selectedCueIds.includes(c.id)).map(g => (<option key={g.id} value={g.id}>📁 {g.name || `Group ${g.number}`}</option>))}</select></div>
+                    {hasGroup && (<div className="w-1/3"><label className="block text-xs text-blue-400 mb-1 font-bold uppercase tracking-wider">Group Behavior</label><select value={isMixed('groupMode') ? 'mixed' : getSharedVal('groupMode', 'fire-all')} onChange={(e) => updateSelectedCues('groupMode', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none">{isMixed('groupMode') && <option value="mixed" disabled>Mixed</option>}<option value="fire-all">Fire All</option><option value="fire-first">Fire First</option></select></div>)}
+                  </div>
                 </div>
+                
                 <div className="space-y-3">
-                  <div className="flex gap-4">
-                    {hasFileMedia && (<div className="flex-1"><label className="block text-xs text-gray-500 mb-1">Media URL</label><div className="flex gap-2"><input type="text" value={isMixed('url') ? '' : getSharedVal('url', '')} placeholder={isMixed('url') ? '<Multiple>' : ''} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-xs font-mono text-gray-400 outline-none" /><button onClick={() => { const input = document.createElement('input'); input.type='file'; input.onchange=(e)=>{const file=e.target.files[0]; if(file){ updateSelectedCues('url', getNativeFilePath(file)); updateSelectedCues('name', file.name); }}; input.click(); }} className="bg-gray-800 hover:bg-gray-700 rounded px-3 text-xs font-semibold text-gray-300 transition-colors">Browse</button></div></div>)}
-                    {hasCamera && (<div className="flex-1"><label className="block text-xs text-green-500 mb-1 font-bold tracking-wide">Capture Hardware Input</label><select value={isMixed('url') ? '' : getSharedVal('url', '')} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-green-950/20 border border-green-800/40 rounded px-3 py-1.5 text-sm font-mono text-green-100 outline-none"><option value="">Default Camera</option>{videoDevices.map(d => (<option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.substring(0,8)}...)`}</option>))}</select></div>)}
-                    
-                    {hasGoto && (
-                      <div className="flex-1 flex gap-2">
-                        <div className="w-1/3">
-                          <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Mode</label>
-                          <select value={isMixed('gotoMode') ? 'mixed' : getSharedVal('gotoMode', 'specific')} onChange={(e) => updateSelectedCues('gotoMode', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none">
-                            {isMixed('gotoMode') && <option value="mixed" disabled>Mixed</option>}
-                            <option value="specific">Exact</option>
-                            <option value="random">Random</option>
-                          </select>
-                        </div>
-                        {getSharedVal('gotoMode', 'specific') === 'random' && !isMixed('gotoMode') ? (
-                          <>
-                            <div className="w-1/3">
-                              <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Min Num</label>
-                              <input type="text" value={isMixed('targetCueRangeMin') ? '' : getSharedVal('targetCueRangeMin', '')} placeholder="Min" onChange={(e) => updateSelectedCues('targetCueRangeMin', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none" />
-                            </div>
-                            <div className="w-1/3">
-                              <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Max Num</label>
-                              <input type="text" value={isMixed('targetCueRangeMax') ? '' : getSharedVal('targetCueRangeMax', '')} placeholder="Max" onChange={(e) => updateSelectedCues('targetCueRangeMax', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none" />
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex-1">
-                            <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Target Cue</label>
-                            <input type="text" value={isMixed('targetCueNumber') ? '' : getSharedVal('targetCueNumber', '')} placeholder="e.g. 1" onChange={(e) => updateSelectedCues('targetCueNumber', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-3 py-1.5 text-sm font-mono text-blue-100 outline-none" />
+                  {!hasGroup && (
+                    <div className="flex gap-4">
+                      {hasFileMedia && (<div className="flex-1"><label className="block text-xs text-gray-500 mb-1">Media URL</label><div className="flex gap-2"><input type="text" value={isMixed('url') ? '' : getSharedVal('url', '')} placeholder={isMixed('url') ? '<Multiple>' : ''} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-xs font-mono text-gray-400 outline-none" /><button onClick={() => { const input = document.createElement('input'); input.type='file'; input.onchange=(e)=>{const file=e.target.files[0]; if(file){ updateSelectedCues('url', getNativeFilePath(file)); updateSelectedCues('name', file.name); }}; input.click(); }} className="bg-gray-800 hover:bg-gray-700 rounded px-3 text-xs font-semibold text-gray-300 transition-colors">Browse</button></div></div>)}
+                      
+                      {hasCamera && (
+                        <div className="flex-1 flex gap-2">
+                          <div className="w-1/3">
+                            <label className="block text-[10px] text-green-500 mb-1 font-bold tracking-wide uppercase">Input Type</label>
+                            <select
+                              value={(getSharedVal('url', '').startsWith('http') || getSharedVal('url', '').startsWith('omt://') || getSharedVal('url', '').startsWith('rtsp://')) ? 'network' : 'local'}
+                              onChange={(e) => updateSelectedCues('url', e.target.value === 'network' ? 'omt://stream.local/video' : '')}
+                              className="w-full bg-green-950/20 border border-green-800/40 rounded px-2 py-1.5 text-xs font-mono text-green-100 outline-none"
+                            >
+                              <option value="local">Local Hardware</option>
+                              <option value="network">OMT / Network</option>
+                            </select>
                           </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    {hasCounter && (
-                      <>
+                          <div className="flex-1">
+                            <label className="block text-[10px] text-green-500 mb-1 font-bold tracking-wide uppercase">Source Configuration</label>
+                            {(getSharedVal('url', '').startsWith('http') || getSharedVal('url', '').startsWith('omt://') || getSharedVal('url', '').startsWith('rtsp://')) ? (
+                              <div className="flex gap-2">
+                                <input type="text" list="omt-streams" value={isMixed('url') ? '' : getSharedVal('url', '')} onChange={(e) => updateSelectedCues('url', e.target.value)} placeholder="omt://ip:port/stream" className="w-full bg-green-950/20 border border-green-800/40 rounded px-3 py-1.5 text-xs font-mono text-green-100 outline-none" />
+                                <datalist id="omt-streams">
+                                  {networkStreams.map((s, idx) => <option key={`stream-${idx}`} value={s.url}>{s.name}</option>)}
+                                </datalist>
+                                <button onClick={handleScanNetwork} className="bg-green-900/40 hover:bg-green-800/60 border border-green-800/40 rounded px-2 text-[10px] font-bold text-green-400 transition-colors flex items-center justify-center gap-1" title="Scan Network for Streams"><RefreshCw className="w-3 h-3" /> Scan</button>
+                              </div>
+                            ) : (
+                              <select value={isMixed('url') ? '' : getSharedVal('url', '')} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-green-950/20 border border-green-800/40 rounded px-3 py-1.5 text-xs font-mono text-green-100 outline-none">
+                                <option value="">Default Camera</option>
+                                {videoDevices.map(d => (<option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.substring(0,8)}...)`}</option>))}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {hasText && (
+                        <div className="flex-1 flex gap-2">
+                          <div className="flex-1">
+                            <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Text Content (Enter = New Line)</label>
+                            <textarea value={isMixed('textContent') ? '' : getSharedVal('textContent', '')} onChange={(e) => updateSelectedCues('textContent', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none resize-none h-16" placeholder="Type here..." />
+                          </div>
+                          <div className="w-20">
+                            <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Color</label>
+                            <input type="color" value={isMixed('textColor') ? '#ffffff' : getSharedVal('textColor', '#ffffff')} onChange={(e) => updateSelectedCues('textColor', e.target.value)} className="w-full h-8 bg-transparent border-0 cursor-pointer" />
+                          </div>
+                          <div className="w-20">
+                            <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Scale</label>
+                            <input type="number" value={isMixed('textScale') ? '' : getSharedVal('textScale', 100)} onChange={(e) => updateSelectedCues('textScale', parseInt(e.target.value) || 10)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-sm font-mono text-blue-100 outline-none" />
+                          </div>
+                        </div>
+                      )}
+
+                      {hasGoto && (
+                        <div className="flex-1 flex gap-2">
+                          <div className="w-1/3">
+                            <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Mode</label>
+                            <select value={isMixed('gotoMode') ? 'mixed' : getSharedVal('gotoMode', 'specific')} onChange={(e) => updateSelectedCues('gotoMode', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none">
+                              {isMixed('gotoMode') && <option value="mixed" disabled>Mixed</option>}
+                              <option value="specific">Exact</option>
+                              <option value="random">Random</option>
+                            </select>
+                          </div>
+                          {getSharedVal('gotoMode', 'specific') === 'random' && !isMixed('gotoMode') ? (
+                            <>
+                              <div className="w-1/3">
+                                <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Min Num</label>
+                                <input type="text" value={isMixed('targetCueRangeMin') ? '' : getSharedVal('targetCueRangeMin', '')} placeholder="Min" onChange={(e) => updateSelectedCues('targetCueRangeMin', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none" />
+                              </div>
+                              <div className="w-1/3">
+                                <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Max Num</label>
+                                <input type="text" value={isMixed('targetCueRangeMax') ? '' : getSharedVal('targetCueRangeMax', '')} placeholder="Max" onChange={(e) => updateSelectedCues('targetCueRangeMax', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-2 py-1.5 text-xs font-mono text-blue-100 outline-none" />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex-1">
+                              <label className="block text-[10px] text-blue-400 mb-1 font-bold uppercase tracking-wider">Target Cue</label>
+                              <input type="text" value={isMixed('targetCueNumber') ? '' : getSharedVal('targetCueNumber', '')} placeholder="e.g. 1" onChange={(e) => updateSelectedCues('targetCueNumber', e.target.value)} className="w-full bg-blue-950/30 border border-blue-800/50 rounded px-3 py-1.5 text-sm font-mono text-blue-100 outline-none" />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {hasStop && (
                         <div className="w-1/3">
-                           <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Target Cue</label>
-                           <input type="text" value={isMixed('targetCueNumber') ? '' : getSharedVal('targetCueNumber', '')} placeholder="e.g. 1" onChange={(e) => updateSelectedCues('targetCueNumber', e.target.value)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-3 py-1.5 text-sm font-mono text-purple-100 outline-none" />
+                           <label className="block text-[10px] text-red-400 mb-1 font-bold uppercase tracking-wider">Target Cue To Stop</label>
+                           <input type="text" value={isMixed('targetCueNumber') ? '' : getSharedVal('targetCueNumber', '')} placeholder="e.g. 1" onChange={(e) => updateSelectedCues('targetCueNumber', e.target.value)} className="w-full bg-red-950/30 border border-red-800/50 rounded px-3 py-1.5 text-sm font-mono text-red-100 outline-none" />
                         </div>
-                        <div className="w-24">
-                           <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Triggers</label>
-                           <input type="number" min="1" value={isMixed('counterLimit') ? '' : getSharedVal('counterLimit', 1)} onChange={(e) => updateSelectedCues('counterLimit', parseInt(e.target.value) || 1)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-3 py-1.5 text-sm font-mono text-purple-100 outline-none" />
-                        </div>
-                      </>
-                    )}
+                      )}
 
-                    {!isOnlyControl && (<div className="w-24"><label className="block text-xs text-gray-500 mb-1">Fade (sec)</label><input type="number" step="0.5" min="0" value={isMixed('fadeTime') ? '' : getSharedVal('fadeTime', 0)} onChange={(e) => updateSelectedCues('fadeTime', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 outline-none" /></div>)}
-                  </div>
-                  
-                  {(!hasImage && !hasCamera && !isOnlyControl && !isOnlyBlackout) && (<div><label className="block text-xs text-gray-500 mb-1">Volume ({isMixed('volume') ? 'Mixed' : Math.round(getSharedVal('volume', 1) * 100)}%)</label><input type="range" min="0" max="1" step="0.01" value={isMixed('volume') ? 0.5 : getSharedVal('volume', 1)} onChange={(e) => updateSelectedCues('volume', parseFloat(e.target.value))} className="w-full mt-1.5 accent-blue-500 cursor-pointer" /></div>)}
-                  
-                  <div className="flex justify-between items-center pt-2">
-                    {(!hasImage && !hasCamera && !isOnlyControl && !isOnlyBlackout) && (<label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer"><input type="checkbox" ref={el=>{if(el) el.indeterminate=isMixed('loop')}} checked={getSharedVal('loop', false)} onChange={(e)=>updateSelectedCues('loop', e.target.checked)} className="w-4 h-4 bg-gray-950 border-gray-700 rounded text-blue-600" />Loop continuously</label>)}
-                    {hasCounter && (
-                      <button onClick={() => updateSelectedCues('counterCurrent', 0)} className="px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-xs font-semibold text-gray-300 transition-colors">
-                        Reset Counter to Zero
-                      </button>
-                    )}
-                    
-                    {/* MASKING CONTROLS */}
-                    {(hasFileMedia || hasCamera) && (
-                      <div className="flex-1 flex justify-end">
-                        <div className="flex items-center gap-2 border-l border-gray-800 pl-4">
-                          <button onClick={() => updateSelectedCues('maskEnabled', !getSharedVal('maskEnabled', false))} className={`px-2 py-1 rounded text-[10px] font-bold tracking-widest border transition-colors ${getSharedVal('maskEnabled', false) ? 'bg-blue-900/40 border-blue-500 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-gray-950 border-gray-700 text-gray-500 hover:text-gray-300'}`}>
-                            {getSharedVal('maskEnabled', false) ? 'MASK ON' : 'MASK OFF'}
-                          </button>
-                          <button 
-                            onClick={() => { setIsPaused(true); setEditingMaskCueId(selectedCueIds[0]); }} 
-                            className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 flex items-center gap-1 text-[11px] font-semibold text-gray-300 transition-colors"
-                          >
-                            <Crop className="w-3.5 h-3.5" /> Edit Mask
-                          </button>
+                      {hasTime && (
+                        <div className="flex-1 flex gap-2">
+                          <div className="w-1/2">
+                            <label className="block text-[10px] text-orange-400 mb-1 font-bold uppercase tracking-wider">Target Date (Blank = Today)</label>
+                            <input type="date" value={isMixed('scheduleDate') ? '' : getSharedVal('scheduleDate', '')} onChange={(e) => updateSelectedCues('scheduleDate', e.target.value)} className="w-full bg-orange-950/30 border border-orange-800/50 rounded px-2 py-1.5 text-xs font-mono text-orange-100 outline-none" />
+                          </div>
+                          <div className="w-1/2">
+                            <label className="block text-[10px] text-orange-400 mb-1 font-bold uppercase tracking-wider">Target Time</label>
+                            <input type="time" value={isMixed('scheduleTime') ? '' : getSharedVal('scheduleTime', '')} onChange={(e) => updateSelectedCues('scheduleTime', e.target.value)} className="w-full bg-orange-950/30 border border-orange-800/50 rounded px-2 py-1.5 text-xs font-mono text-orange-100 outline-none" />
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+
+                      {hasCounter && (
+                        <>
+                          <div className="w-1/3">
+                             <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Target Cue</label>
+                             <input type="text" value={isMixed('targetCueNumber') ? '' : getSharedVal('targetCueNumber', '')} placeholder="e.g. 1" onChange={(e) => updateSelectedCues('targetCueNumber', e.target.value)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-3 py-1.5 text-sm font-mono text-purple-100 outline-none" />
+                          </div>
+                          <div className="w-24">
+                             <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Triggers</label>
+                             <input type="number" min="1" value={isMixed('counterLimit') ? '' : getSharedVal('counterLimit', 1)} onChange={(e) => updateSelectedCues('counterLimit', parseInt(e.target.value) || 1)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-3 py-1.5 text-sm font-mono text-purple-100 outline-none" />
+                          </div>
+                        </>
+                      )}
+
+                      {!isOnlyControl && !hasText && (<div className="w-24"><label className="block text-xs text-gray-500 mb-1">Fade (sec)</label><input type="number" step="0.5" min="0" value={isMixed('fadeTime') ? '' : getSharedVal('fadeTime', 0)} onChange={(e) => updateSelectedCues('fadeTime', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 outline-none" /></div>)}
+                    </div>
+                  )}
+                  
+                  {(!hasImage && !hasCamera && !isOnlyControl && !isOnlyBlackout && !hasGroup && !hasText) && (<div><label className="block text-xs text-gray-500 mb-1">Volume ({isMixed('volume') ? 'Mixed' : Math.round(getSharedVal('volume', 1) * 100)}%)</label><input type="range" min="0" max="1" step="0.01" value={isMixed('volume') ? 0.5 : getSharedVal('volume', 1)} onChange={(e) => updateSelectedCues('volume', parseFloat(e.target.value))} className="w-full mt-1.5 accent-blue-500 cursor-pointer" /></div>)}
+                  
+                  {!hasGroup && (
+                    <div className="flex justify-between items-center pt-2">
+                      {(!hasImage && !hasCamera && !isOnlyControl && !isOnlyBlackout && !hasText) && (<label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer"><input type="checkbox" ref={el=>{if(el) el.indeterminate=isMixed('loop')}} checked={getSharedVal('loop', false)} onChange={(e)=>updateSelectedCues('loop', e.target.checked)} className="w-4 h-4 bg-gray-950 border-gray-700 rounded text-blue-600" />Loop continuously</label>)}
+                      {hasCounter && (
+                        <button onClick={() => updateSelectedCues('counterCurrent', 0)} className="px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-xs font-semibold text-gray-300 transition-colors">
+                          Reset Counter to Zero
+                        </button>
+                      )}
+                      
+                      {/* MASKING CONTROLS */}
+                      {(hasFileMedia || hasCamera) && (
+                        <div className="flex-1 flex justify-end">
+                          <div className="flex items-center gap-2 border-l border-gray-800 pl-4">
+                            <button onClick={() => updateSelectedCues('maskEnabled', !getSharedVal('maskEnabled', false))} className={`px-2 py-1 rounded text-[10px] font-bold tracking-widest border transition-colors ${getSharedVal('maskEnabled', false) ? 'bg-blue-900/40 border-blue-500 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-gray-950 border-gray-700 text-gray-500 hover:text-gray-300'}`}>
+                              {getSharedVal('maskEnabled', false) ? 'MASK ON' : 'MASK OFF'}
+                            </button>
+                            <button 
+                              onClick={() => { setIsPaused(true); setEditingMaskCueId(selectedCueIds[0]); }} 
+                              className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 flex items-center gap-1 text-[11px] font-semibold text-gray-300 transition-colors"
+                            >
+                              <Crop className="w-3.5 h-3.5" /> Edit Mask
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="col-span-2 space-y-3 pt-4 border-t border-gray-800">
-                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Playback Behaviors</h3>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div><label className="block text-xs text-gray-500 mb-1">On Trigger</label><select value={isMixed('triggerBehavior') ? 'mixed' : getSharedVal('triggerBehavior', 'overlap')} onChange={(e) => updateSelectedCues('triggerBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none">{isMixed('triggerBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="overlap">Overlap (Play on top)</option><option value="stop-others">Hard Stop</option></select></div>
-                    <div><label className="block text-xs text-gray-500 mb-1">Media End</label><select disabled={hasImage || hasCamera || hasBlackout || hasPause || hasGoto} value={isMixed('endBehavior') ? 'mixed' : getSharedVal('endBehavior', 'none')} onChange={(e) => updateSelectedCues('endBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none disabled:opacity-30">{isMixed('endBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="none">Stop Playback</option><option value="auto-follow">Auto-Follow</option></select></div>
-                    <div><label className="flex items-center gap-2 text-xs text-gray-500 mb-1 cursor-pointer"><input type="checkbox" ref={el => { if(el) el.indeterminate = isMixed('autoAdvance') }} checked={getSharedVal('autoAdvance', false)} onChange={(e) => updateSelectedCues('autoAdvance', e.target.checked)} className="w-3 h-3 accent-blue-500" />Auto-Advance</label><div className="flex items-center gap-2"><input type="number" step="0.5" min="0" disabled={isMixed('autoAdvance') ? false : !getSharedVal('autoAdvance', false)} value={isMixed('advanceTime') ? '' : getSharedVal('advanceTime', 0)} onChange={(e) => updateSelectedCues('advanceTime', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 outline-none disabled:opacity-30" /><span className="text-xs text-gray-500">sec</span></div></div>
+                {!hasGroup && (
+                  <div className="col-span-2 space-y-3 pt-4 border-t border-gray-800">
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Playback Behaviors</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div><label className="block text-xs text-gray-500 mb-1">On Trigger</label><select value={isMixed('triggerBehavior') ? 'mixed' : getSharedVal('triggerBehavior', 'overlap')} onChange={(e) => updateSelectedCues('triggerBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none">{isMixed('triggerBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="overlap">Overlap (Play on top)</option><option value="stop-others">Hard Stop</option></select></div>
+                      <div><label className="block text-xs text-gray-500 mb-1">Media End</label><select disabled={hasImage || hasCamera || hasBlackout || hasPause || hasGoto || hasStop || hasTime || hasText} value={isMixed('endBehavior') ? 'mixed' : getSharedVal('endBehavior', 'none')} onChange={(e) => updateSelectedCues('endBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none disabled:opacity-30">{isMixed('endBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="none">Stop Playback</option><option value="auto-follow">Auto-Follow</option></select></div>
+                      <div><label className="flex items-center gap-2 text-xs text-gray-500 mb-1 cursor-pointer"><input type="checkbox" ref={el => { if(el) el.indeterminate = isMixed('autoAdvance') }} checked={getSharedVal('autoAdvance', false)} onChange={(e) => updateSelectedCues('autoAdvance', e.target.checked)} className="w-3 h-3 accent-blue-500" disabled={hasTime} />Auto-Advance</label><div className="flex items-center gap-2"><input type="number" step="0.5" min="0" disabled={isMixed('autoAdvance') ? false : !getSharedVal('autoAdvance', false)} value={isMixed('advanceTime') ? '' : getSharedVal('advanceTime', 0)} onChange={(e) => updateSelectedCues('advanceTime', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 outline-none disabled:opacity-30" /><span className="text-xs text-gray-500">sec</span></div></div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="col-span-2 space-y-3 pt-4 border-t border-gray-800">
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Media Properties (MediaInfo)</h3>
@@ -1309,9 +1643,9 @@ export default function App() {
                         return (
                           <>
                             <div className="grid grid-cols-3 gap-4">
-                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Resolution</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.resolution || (activeCue?.type === 'audio' ? 'N/A' : 'Pending...')}</div></div>
-                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Duration</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.duration ? formatTime(metadata[activeCue.id].duration) : (activeCue?.type === 'image' || activeCue?.type === 'camera' || isOnlyControl || isOnlyBlackout ? 'Infinite' : 'Pending...')}</div></div>
-                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Status</div><div className="flex items-center gap-1.5 text-sm font-mono text-gray-300"><div className={`w-2 h-2 rounded-full ${metadata[activeCue?.id]?.status === 'Loaded' || activeCue?.type === 'camera' || isOnlyControl || isOnlyBlackout ? 'bg-green-500' : metadata[activeCue?.id]?.status === 'Error' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>{activeCue?.type === 'camera' ? 'Active' : isOnlyControl || isOnlyBlackout ? 'Ready' : metadata[activeCue?.id]?.status || 'Probing...'}</div></div>
+                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Resolution</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.resolution || (activeCue?.type === 'audio' || activeCue?.type === 'group' ? 'N/A' : (activeCue?.type === 'text' ? '1920x1080' : 'Pending...'))}</div></div>
+                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Duration</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.duration ? formatTime(metadata[activeCue.id].duration) : (activeCue?.type === 'image' || activeCue?.type === 'camera' || activeCue?.type === 'text' || isOnlyControl || isOnlyBlackout ? 'Infinite' : 'Pending...')}</div></div>
+                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Status</div><div className="flex items-center gap-1.5 text-sm font-mono text-gray-300"><div className={`w-2 h-2 rounded-full ${metadata[activeCue?.id]?.status === 'Loaded' || activeCue?.type === 'camera' || activeCue?.type === 'text' || isOnlyControl || isOnlyBlackout ? 'bg-green-500' : metadata[activeCue?.id]?.status === 'Error' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>{activeCue?.type === 'camera' ? 'Active' : activeCue?.type === 'text' ? 'Generated' : isOnlyControl || isOnlyBlackout ? 'Ready' : metadata[activeCue?.id]?.status || 'Probing...'}</div></div>
                             </div>
                             <div className="border-t border-gray-800/80 pt-3 grid grid-cols-3 gap-4">
                               <div className="col-span-2"><div className="text-[10px] text-gray-500 uppercase mb-0.5">File Name</div><div className="text-sm font-mono text-gray-300 truncate" title={fileName}>{fileName}</div></div>
