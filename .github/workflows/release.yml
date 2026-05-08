@@ -1,0 +1,44 @@
+name: Build and Release TuxShow
+
+# 1. This tells GitHub to ONLY run this script when you push a new version tag (e.g., v1.0.3)
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-publish:
+    # 2. Spin up a fresh Ubuntu machine in the cloud
+    runs-on: ubuntu-latest
+    
+    # Give the script permission to create a Release page on your repository
+    permissions:
+      contents: write 
+
+    steps:
+      # 3. Download your TuxShow code onto the cloud machine
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 4. Install Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 5. Install the project dependencies (just like you do on your laptop)
+      - name: Install Dependencies
+        run: npm install
+
+      # 6. Run your build script to generate the .deb file in the release/ folder
+      - name: Build the .deb Installer
+        run: npm run dist
+
+      # 7. Take that generated .deb file and automatically publish it to the GitHub Releases page
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.deb
+          generate_release_notes: true # Automatically creates bullet points of your code changes!
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
