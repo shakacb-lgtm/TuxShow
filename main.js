@@ -4,7 +4,17 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import os from 'os';
 
-// --- HARDWARE GPU TUNING ---
+// --- OPTIONAL PLUGIN IMPORTS (OSC/MSC) ---
+let OSCServer, OSCClient, easymidi;
+try {
+  const nodeOsc = await import('node-osc');
+  OSCServer = nodeOsc.Server;
+  OSCClient = nodeOsc.Client;
+  easymidi = (await import('easymidi')).default;
+} catch (err) {
+  console.warn("TuxShow: Hardware I/O plugins (node-osc or easymidi) not installed. Network features will be disabled.");
+}
+
 function applyHardwareTuning() {
   let currentGpuStatus = "Standard GPU Accelerated";
   let isIntel = false;
@@ -22,7 +32,7 @@ function applyHardwareTuning() {
       if (lspciOutput.includes('amd') || lspciOutput.includes('radeon')) isAMD = true;
       if (lspciOutput.includes('nvidia')) isNvidia = true;
     } catch (e) {
-      console.warn("TuxShow: Could not execute lspci to detect GPU. Defaulting to safe mode.", e);
+      console.warn("TuxShow: Could not execute lspci to detect GPU. Defaulting to safe mode.");
     }
   }
 
@@ -39,10 +49,12 @@ function applyHardwareTuning() {
     app.commandLine.appendSwitch('use-gl', 'desktop');
 
     if ((isIntel || isAMD) && !isNvidia) {
+      console.log("TuxShow: Modern Intel/AMD iGPU detected. Enabling Zero-Copy Unified Memory optimizations.");
       app.commandLine.appendSwitch('enable-zero-copy');
       app.commandLine.appendSwitch('enable-native-gpu-memory-buffers');
       currentGpuStatus = "Zero-Copy Unified Memory Accelerated";
     } else {
+      console.log("TuxShow: Dedicated GPU (or Nvidia) detected. Bypassing Zero-Copy for maximum stability.");
       currentGpuStatus = "Standard GPU Accelerated";
     }
   }
@@ -59,12 +71,15 @@ let mainWindow;
 let projectorWindow;
 let splashWindow; 
 
+// --- HARDWARE I/O STATE ---
+let oscServerInstance = null;
+let mscInputInstance = null;
+
 function createWindow() {
   const iconPath = app.isPackaged 
     ? path.join(__dirname, 'dist', 'icon.png') 
     : path.join(__dirname, 'public', 'icon.png');
 
-  // --- SPLASH SCREEN RESTORED ---
   splashWindow = new BrowserWindow({
     width: 1024, height: 559, frame: false, alwaysOnTop: true,
     backgroundColor: '#0f172a', show: true, icon: iconPath
@@ -73,7 +88,6 @@ function createWindow() {
   if (app.isPackaged) splashWindow.loadFile(path.join(__dirname, 'dist', 'splash.html'));
   else splashWindow.loadFile(path.join(__dirname, 'public', 'splash.html'));
 
-  // --- MAIN CONTROL WINDOW ---
   mainWindow = new BrowserWindow({
     width: 1280, height: 720, title: "TuxShow", show: false, icon: iconPath,
     webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false }
@@ -88,6 +102,71 @@ function createWindow() {
       mainWindow.show();
     }, 2500); 
   });
+
+  // --- HARDWARE I/O ROUTES ---
+  
+  ipcMain.on('update-io-config', (event, config) => {
+    // 1. Manage OSC Listener
+    if (OSCServer) {
+      if (config.oscInput) {
+        if (!oscServerInstance) {
+          try {
+            oscServerInstance = new OSCServer(config.oscPort, '0.0.0.0');
+            oscServerInstance.on('message', (msg) => {
+              if (mainWindow) mainWindow.webContents.send('osc-message', { path: msg[0], args: msg.slice(1) });
+            });
+            console.log(`TuxShow: OSC Listener Active on Port ${config.oscPort}`);
+          } catch(e) { console.error('OSC Server Failed:', e); }
+        }
+      } else {
+        if (oscServerInstance) { oscServerInstance.close(); oscServerInstance = null; console.log('TuxShow: OSC Listener Closed.'); }
+      }
+    }
+
+    // 2. Manage MSC (MIDI) Listener
+    if (easymidi) {
+      if (config.mscInput && config.mscDevice) {
+         if (!mscInputInstance) {
+            try {
+               mscInputInstance = new easymidi.Input(config.mscDevice);
+               mscInputInstance.on('sysex', (msg) => {
+                  // Forward raw Hex SysEx payload to React to parse Show Control Commands
+                  if (mainWindow) mainWindow.webContents.send('msc-message', { raw: msg.bytes });
+               });
+               console.log(`TuxShow: MSC Listener Active on ${config.mscDevice}`);
+            } catch(e) { console.error('MSC MIDI Connection Failed:', e); }
+         }
+      } else {
+         if (mscInputInstance) { mscInputInstance.close(); mscInputInstance = null; console.log('TuxShow: MSC Listener Closed.'); }
+      }
+    }
+  });
+
+  ipcMain.on('send-osc', (event, { ip, port, address, args }) => {
+    if (!OSCClient) return;
+    try {
+      const client = new OSCClient(ip, port);
+      const argArray = args ? String(args).split(',').map(a => { const num = parseFloat(a); return isNaN(num) ? a.trim() : num; }) : [];
+      client.send(address, ...argArray, () => client.close());
+    } catch(e) { console.error('OSC Send Error:', e); }
+  });
+
+  ipcMain.on('send-msc', (event, { deviceId, format, command, cueNumber }) => {
+    if (!easymidi) return;
+    try {
+       const cueBytes = cueNumber.split('').map(c => c.charCodeAt(0));
+       // Standard Universal MIDI SysEx Header: F0 7F <deviceId> 02 <format> <command> <cueNumberString> F7
+       const sysex = [0xF0, 0x7F, parseInt(deviceId), 0x02, parseInt(format), parseInt(command), ...cueBytes, 0xF7];
+       
+       const outputs = easymidi.getOutputs();
+       if (outputs.length > 0) {
+           const out = new easymidi.Output(outputs[0]);
+           out.send('sysex', sysex);
+           out.close();
+       }
+    } catch(e) { console.error('MSC Send Error:', e); }
+  });
+
 
   // --- PROJECTOR IPC COMMANDS ---
   ipcMain.on('spawn-projector', () => {
@@ -108,27 +187,11 @@ function createWindow() {
 
     projectorWindow.on('closed', () => {
       projectorWindow = null;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-         mainWindow.webContents.send('projector-closed');
-      }
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('projector-closed');
     });
   });
 
-  ipcMain.on('close-projector', () => {
-    if (projectorWindow) {
-      projectorWindow.close();
-    }
-  });
-
-  // --- OMT BROADCAST IPC STUBS ---
-  ipcMain.on('start-omt-broadcast', () => {
-    console.log("Backend received: Start OMT Broadcast");
-    // Future OMT Network routing logic will go here
-  });
-
-  ipcMain.on('stop-omt-broadcast', () => {
-    console.log("Backend received: Stop OMT Broadcast");
-  });
+  ipcMain.on('close-projector', () => { if (projectorWindow) projectorWindow.close(); });
 }
 
 app.whenReady().then(createWindow);

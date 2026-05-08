@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Square, Video, Music, Settings, Maximize, AlertCircle, ChevronRight, ChevronDown, Edit3, Plus, Trash2, Crosshair, ArrowRight, Layers, StopCircle, MonitorUp, MonitorDown, Grid3X3, RotateCcw, GripVertical, Image as ImageIcon, Clock, Save, FolderOpen, Folder, FilePlus, Pause, Activity, CornerDownRight, FolderPlus, FileText, Camera, Moon, PauseCircle, Search, Hash, Crop, X, Check, Repeat, XSquare, CalendarClock, Type, Radio, RefreshCw } from 'lucide-react';
+import { Play, Square, Video, Music, Settings, Maximize, AlertCircle, ChevronRight, ChevronDown, Edit3, Plus, Trash2, Crosshair, ArrowRight, Layers, StopCircle, MonitorUp, MonitorDown, Grid3X3, RotateCcw, GripVertical, Image as ImageIcon, Clock, Save, FolderOpen, Folder, FilePlus, Pause, Activity, CornerDownRight, FolderPlus, FileText, Camera, Moon, PauseCircle, Search, Hash, Crop, X, Check, Repeat, XSquare, CalendarClock, Type, Radio, RefreshCw, Settings2, Wifi } from 'lucide-react';
 
 // --- TIME FORMAT HELPER ---
 const formatTime = (timeInSeconds) => {
@@ -11,7 +11,7 @@ const formatTime = (timeInSeconds) => {
 
 // --- AUDIO VISUALIZER COMPONENT ---
 const AudioVisualizer = ({ isPlaying, isPaused, type }) => {
-  if (!isPlaying || type === 'image' || type === 'goto' || type === 'pause' || type === 'blackout' || type === 'counter' || type === 'stop' || type === 'group' || type === 'time' || type === 'text') return null;
+  if (!isPlaying || type === 'image' || type === 'goto' || type === 'pause' || type === 'blackout' || type === 'counter' || type === 'stop' || type === 'group' || type === 'time' || type === 'text' || type === 'msc' || type === 'osc') return null;
   return (
     <div className="flex items-end gap-[2px] h-3 ml-3 shrink-0" title={isPaused ? "Audio Paused" : "Audio Playing"}>
       <div className="w-[3px] bg-green-500 rounded-t-sm origin-bottom" style={{ animation: `meter 0.4s ease-in-out infinite alternate ${isPaused ? 'paused' : 'running'}`, height: '100%' }} />
@@ -347,6 +347,8 @@ const getFileInfo = (url, cueType) => {
   if (cueType === 'group') return { fileName: 'Group Folder', fileType: 'FOLDER', displayPath: 'Internal Logic Container' };
   if (cueType === 'time') return { fileName: 'Scheduled Trigger', fileType: 'ACTION', displayPath: 'Internal Clock Engine' };
   if (cueType === 'text') return { fileName: 'Text / Title Generator', fileType: 'GRAPHIC', displayPath: 'Internal Render Engine' };
+  if (cueType === 'msc') return { fileName: 'MIDI Show Control', fileType: 'NETWORK', displayPath: 'Internal Protocol Engine' };
+  if (cueType === 'osc') return { fileName: 'Open Sound Control', fileType: 'NETWORK', displayPath: 'Internal Protocol Engine' };
   if (url) {
      try {
          const parts = decodeURIComponent(new URL(url).pathname).split('/');
@@ -395,17 +397,12 @@ export default function App() {
   }, []);
 
   const [cues, setCues] = useState([
-    { id: '0', number: '0', type: 'group', name: 'Pre-Show Sequence', url: '', state: 'stopped', groupMode: 'fire-all', isExpanded: true, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '1', number: '1', type: 'video', name: 'Background Loop', url: MEDIA.video1, state: 'stopped', loop: true, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 2.0, volume: 1, targetCueNumber: '', notes: 'Wait for house lights to fully dim.', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: '0', scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '2', number: '2', type: 'audio', name: 'Ambient Music', url: MEDIA.audio2, state: 'stopped', loop: true, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 5.0, volume: 0.5, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: '0', scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '3', number: '3', type: 'image', name: 'Overlay Graphic', url: MEDIA.image1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 1.0, autoAdvance: true, advanceTime: 4, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '4', number: '4', type: 'camera', name: 'Stage Live Feed', url: '', state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 1.0, volume: 1, targetCueNumber: '', notes: 'Standby for guest speaker', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '5', number: '5', type: 'goto', name: 'Randomize Intro Video', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, gotoMode: 'random', targetCueRangeMin: '1', targetCueRangeMax: '3', groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '6', number: '6', type: 'blackout', name: 'Fade to Black', url: '', state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 3.0, volume: 1, targetCueNumber: '', notes: 'Global 3 second hard stop.', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '7', number: '7', type: 'counter', name: 'Repeat Loop 3 Times', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'auto-follow', fadeTime: 0, volume: 1, targetCueNumber: '1', notes: 'Increment and proceed, or jump if limit reached.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 3, counterCurrent: 0, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '8', number: '8', type: 'stop', name: 'Stop Ambient Music', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '2', notes: 'Targeted stop for Cue 2.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '9', number: '9', type: 'time', name: 'Wait for Start Time', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'auto-follow', fadeTime: 0, volume: 1, targetCueNumber: '', notes: 'Holds the show in a paused state until the clock hits the exact target time, then automatically triggers the next cue.', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '17:00', textContent: '', textColor: '#ffffff', textScale: 100 },
-    { id: '10', number: '10', type: 'text', name: 'Intermission Label', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 1.0, volume: 1, targetCueNumber: '', notes: 'Overlays a generated label', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '', textContent: 'INTERMISSION\nWill return shortly...', textColor: '#ffcc00', textScale: 120 },
+    { id: '0', number: '0', type: 'group', name: 'Pre-Show Sequence', url: '', state: 'stopped', groupMode: 'fire-all', isExpanded: true, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' },
+    { id: '1', number: '1', type: 'video', name: 'Background Loop', url: MEDIA.video1, state: 'stopped', loop: true, triggerBehavior: 'stop-others', endBehavior: 'none', fadeTime: 2.0, volume: 1, targetCueNumber: '', notes: 'Wait for house lights to fully dim.', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: '0', scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' },
+    { id: '2', number: '2', type: 'audio', name: 'Ambient Music', url: MEDIA.audio2, state: 'stopped', loop: true, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 5.0, volume: 0.5, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: '0', scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' },
+    { id: '3', number: '3', type: 'image', name: 'Overlay Graphic', url: MEDIA.image1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 1.0, autoAdvance: true, advanceTime: 4, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' },
+    { id: '4', number: '4', type: 'osc', name: 'Trigger External Audio Console', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'auto-follow', fadeTime: 0, volume: 1, targetCueNumber: '', notes: 'Fires QLab via OSC', cameraLive: true, maskEnabled: false, maskDataUrl: null, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '192.168.1.100', oscPort: 53000, oscAddress: '/cue/10/go', oscArgs: '' },
+    { id: '5', number: '5', type: 'msc', name: 'Trigger Lighting Console', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: 'Fires EOS console via MSC', cameraLive: true, maskEnabled: false, maskDataUrl: null, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 1, mscCommand: 'GO', mscCue: '15', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' },
   ]);
   
   const [selectedCueIds, setSelectedCueIds] = useState(['0']);
@@ -414,6 +411,7 @@ export default function App() {
   const [editingMaskCueId, setEditingMaskCueId] = useState(null); 
   const [mediaTimes, setMediaTimes] = useState({}); 
   const [showNewModal, setShowNewModal] = useState(false); 
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isPaused, setIsPaused] = useState(false); 
   const [showStats, setShowStats] = useState(false); 
   const [metadata, setMetadata] = useState({}); 
@@ -421,6 +419,21 @@ export default function App() {
   const [jumpToValue, setJumpToValue] = useState(""); 
   const [networkStreams, setNetworkStreams] = useState([]);
   
+  const [ioConfig, setIoConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tuxshow_io_config');
+      return saved ? JSON.parse(saved) : { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' };
+    } catch(e) { return { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; }
+  });
+
+  useEffect(() => {
+    try {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('update-io-config', ioConfig);
+    } catch(e) {}
+    localStorage.setItem('tuxshow_io_config', JSON.stringify(ioConfig));
+  }, [ioConfig]);
+
   const probedCues = useRef(new Set()); 
   const [gridSize, setGridSize] = useState({ x: 1, y: 1 });
   const [pins, setPins] = useState([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }]);
@@ -432,6 +445,7 @@ export default function App() {
   const fileInputRef = useRef(null); 
   const folderInputRef = useRef(null); 
   const [gpuStatus, setGpuStatus] = useState("Probing Hardware..."); 
+  const [localIp, setLocalIp] = useState('127.0.0.1');
 
   const [draggedCueId, setDraggedCueId] = useState(null);
   const [dragOverCueId, setDragOverCueId] = useState(null);
@@ -569,7 +583,7 @@ export default function App() {
   }, [scrollCueIntoView, evaluateCue]);
 
   useEffect(() => {
-    const actionCues = cues.filter(c => (c.type === 'pause' || c.type === 'counter' || c.type === 'stop') && c.state === 'playing');
+    const actionCues = cues.filter(c => (c.type === 'pause' || c.type === 'counter' || c.type === 'stop' || c.type === 'msc' || c.type === 'osc') && c.state === 'playing');
     if (actionCues.length > 0) {
       if (actionCues.some(c => c.type === 'pause')) setIsPaused(true);
       
@@ -579,7 +593,7 @@ export default function App() {
 
       setCues(prev => prev.map(c => {
          let updated = c;
-         if ((c.type === 'pause' || c.type === 'counter' || c.type === 'stop') && c.state === 'playing') {
+         if ((c.type === 'pause' || c.type === 'counter' || c.type === 'stop' || c.type === 'msc' || c.type === 'osc') && c.state === 'playing') {
            updated = { ...updated, state: 'stopped' };
          }
          if (targetIdsToStop.includes(c.id) && c.state === 'playing') {
@@ -588,7 +602,17 @@ export default function App() {
          return updated;
       }));
 
-      actionCues.forEach(ac => { if (ac.endBehavior === 'auto-follow') setTimeout(() => triggerNextCueAfter(ac.id), 0); });
+      actionCues.forEach(ac => {
+        // --- EXECUTE MSC & OSC NETWORK PAYLOADS ---
+        if (ac.type === 'msc' || ac.type === 'osc') {
+          try {
+            const { ipcRenderer } = window.require('electron');
+            if (ac.type === 'msc') ipcRenderer.send('send-msc', { device: ac.mscDevice, command: ac.mscCommand, cueNumber: ac.mscCue });
+            if (ac.type === 'osc') ipcRenderer.send('send-osc', { ip: ac.oscIp, port: ac.oscPort, address: ac.oscAddress, args: ac.oscArgs });
+          } catch (e) { console.log(`[Backend Simulated] Fired ${ac.type.toUpperCase()} Protocol Trigger`); }
+        }
+        if (ac.endBehavior === 'auto-follow') setTimeout(() => triggerNextCueAfter(ac.id), 0); 
+      });
     }
   }, [cues, triggerNextCueAfter, evaluateCue]); 
 
@@ -629,6 +653,119 @@ export default function App() {
     return () => clearInterval(interval);
   }, [cues, handleCueEnded]);
 
+  // --- OSC LISTENER ENGINE ---
+  const masterVolumeRef = useRef(1);
+  
+  useEffect(() => {
+    try {
+      const { ipcRenderer } = window.require('electron');
+      
+      const handleOscMessage = (event, { path, args }) => {
+        const currentCues = cuesRef.current;
+        
+        // 1. Global Commands
+        if (path === '/tuxshow/go') handleGo();
+        else if (path === '/tuxshow/stop') handleStopAll();
+        else if (path === '/tuxshow/pause') setIsPaused(true);
+        else if (path === '/tuxshow/resume') setIsPaused(false);
+        else if (path === '/tuxshow/panic') {
+           setCues(prev => prev.map(c => c.state === 'playing' ? { ...c, state: c.fadeTime > 0 ? 'stopping' : 'stopped' } : c));
+        }
+        
+        // 2. Navigation
+        else if (path === '/tuxshow/select/next') {
+           setSelectedCueIds(prev => {
+              if (prev.length === 0) return [currentCues[0]?.id].filter(Boolean);
+              const lastIdx = Math.max(...prev.map(id => currentCues.findIndex(c => c.id === id)));
+              if (lastIdx >= 0 && lastIdx < currentCues.length - 1) {
+                 const nextId = currentCues[lastIdx + 1].id;
+                 setLastSelectedId(nextId); scrollCueIntoView(nextId); return [nextId];
+              }
+              return prev;
+           });
+        }
+        else if (path === '/tuxshow/select/prev') {
+           setSelectedCueIds(prev => {
+              if (prev.length === 0) return [currentCues[0]?.id].filter(Boolean);
+              const firstIdx = Math.min(...prev.map(id => currentCues.findIndex(c => c.id === id)));
+              if (firstIdx > 0) {
+                 const prevId = currentCues[firstIdx - 1].id;
+                 setLastSelectedId(prevId); scrollCueIntoView(prevId); return [prevId];
+              }
+              return prev;
+           });
+        }
+        else if (path === '/tuxshow/select/cue' && args.length > 0) {
+           const targetNum = String(args[0]);
+           const found = currentCues.find(c => String(c.number) === targetNum);
+           if (found) {
+              setSelectedCueIds([found.id]); setLastSelectedId(found.id); scrollCueIntoView(found.id);
+           }
+        }
+        
+        // 4. Live Mixing - Master Volume
+        else if (path === '/tuxshow/master/volume' && args.length > 0) {
+           const vol = Math.max(0, Math.min(1, parseFloat(args[0]) || 0));
+           masterVolumeRef.current = vol;
+           currentCues.filter(c => c.state === 'playing').forEach(cue => {
+               const el = document.getElementById(`master-${cue.type === 'audio' ? 'aud' : (cue.type === 'video' ? 'vid' : '')}-${cue.id}`);
+               if (el && !fadeIntervals.current[el.id]) {
+                   el.volume = (cue.volume !== undefined ? cue.volume : 1) * vol;
+               }
+           });
+        }
+        
+        // 3 & 4. Specific Cue Controls
+        else {
+           const cueMatch = path.match(/^\/tuxshow\/cue\/([\w.]+)\/(start|stop|pause|resume|volume|opacity)$/);
+           if (cueMatch) {
+              const targetCueNum = cueMatch[1];
+              const action = cueMatch[2];
+              const targetCue = currentCues.find(c => String(c.number) === targetCueNum);
+              
+              if (targetCue) {
+                 if (action === 'start') {
+                    const resolved = evaluateCue(targetCue.id, currentCues);
+                    if (resolved.length > 0) {
+                       setCues(prev => {
+                          let nextState = [...prev];
+                          const hasHardStop = resolved.some(r => r.triggerBehavior === 'stop-others');
+                          const resolvedIds = resolved.map(r => r.id);
+                          return nextState.map(c => {
+                             if (resolvedIds.includes(c.id)) return { ...c, state: 'playing' };
+                             if (hasHardStop && !resolvedIds.includes(c.id) && c.state === 'playing') {
+                                return { ...c, state: c.fadeTime > 0 ? 'stopping' : 'stopped' };
+                             }
+                             return c;
+                          });
+                       });
+                    }
+                 } else if (action === 'stop') {
+                    stopCue(targetCue.id);
+                 } else if (action === 'pause') {
+                    const el = document.getElementById(`master-${targetCue.type === 'audio' ? 'aud' : (targetCue.type === 'video' ? 'vid' : '')}-${targetCue.id}`);
+                    if (el) el.pause();
+                 } else if (action === 'resume') {
+                    const el = document.getElementById(`master-${targetCue.type === 'audio' ? 'aud' : (targetCue.type === 'video' ? 'vid' : '')}-${targetCue.id}`);
+                    if (el && targetCue.state === 'playing') el.play().catch(()=>{});
+                 } else if (action === 'volume' && args.length > 0) {
+                    const vol = Math.max(0, Math.min(1, parseFloat(args[0]) || 0));
+                    setCues(prev => prev.map(c => c.id === targetCue.id ? { ...c, volume: vol } : c));
+                 } else if (action === 'opacity' && args.length > 0) {
+                    const op = Math.max(0, Math.min(1, parseFloat(args[0]) || 0));
+                    setCues(prev => prev.map(c => c.id === targetCue.id ? { ...c, customOpacity: op } : c));
+                 }
+              }
+           }
+        }
+      };
+
+      ipcRenderer.on('osc-message', handleOscMessage);
+      return () => ipcRenderer.removeListener('osc-message', handleOscMessage);
+    } catch (e) {
+      console.warn("Browser Environment: OSC IPC not bound.");
+    }
+  }, [handleGo, handleStopAll, evaluateCue, scrollCueIntoView]);
 
   useEffect(() => {
     if (!isProjector && navigator.mediaDevices) {
@@ -674,18 +811,32 @@ export default function App() {
     if (!isProjector) {
       try { const { ipcRenderer } = window.require('electron'); ipcRenderer.invoke('get-gpu-status').then(status => setGpuStatus(status)); } 
       catch (e) { setGpuStatus("Browser Mode (No Native GPU API)"); }
+
+      // Fetch Local IP Address for Status Bar
+      try {
+        const os = window.require('os');
+        const nets = os.networkInterfaces();
+        for (const name of Object.keys(nets)) {
+          for (const net of nets[name]) {
+            if (net.family === 'IPv4' && !net.internal) {
+              setLocalIp(net.address);
+              return;
+            }
+          }
+        }
+      } catch (e) {}
     }
   }, [isProjector]);
 
   const doVolumeFade = useCallback((el, startVol, endVol, durationSec) => {
     if (fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
-    if (durationSec <= 0) { el.volume = Math.max(0, Math.min(1, endVol)); return; }
+    if (durationSec <= 0) { el.volume = Math.max(0, Math.min(1, endVol * masterVolumeRef.current)); return; }
     const steps = 20; const interval = 1000 / steps; const totalSteps = Math.max(1, durationSec * steps);
-    let step = 0; el.volume = Math.max(0, Math.min(1, startVol));
+    let step = 0; el.volume = Math.max(0, Math.min(1, startVol * masterVolumeRef.current));
     fadeIntervals.current[el.id] = setInterval(() => {
       step++;
-      el.volume = Math.max(0, Math.min(1, startVol + (endVol - startVol) * (step / totalSteps)));
-      if (step >= totalSteps) { clearInterval(fadeIntervals.current[el.id]); el.volume = Math.max(0, Math.min(1, endVol)); }
+      el.volume = Math.max(0, Math.min(1, (startVol + (endVol - startVol) * (step / totalSteps)) * masterVolumeRef.current));
+      if (step >= totalSteps) { clearInterval(fadeIntervals.current[el.id]); el.volume = Math.max(0, Math.min(1, endVol * masterVolumeRef.current)); }
     }, interval);
   }, []);
 
@@ -700,15 +851,18 @@ export default function App() {
 
       if (cue.state === 'playing' && lastState !== 'playing') {
           fadeStateTrackers.current[trackKey] = { state: 'playing', start: performance.now(), duration: cue.fadeTime || 0 };
-          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text') {
+          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text' && cue.type !== 'msc' && cue.type !== 'osc') {
               if (cue.fadeTime > 0) doVolumeFade(el, 0, cue.volume !== undefined ? cue.volume : 1, cue.fadeTime);
-              else el.volume = cue.volume !== undefined ? cue.volume : 1;
+              else el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current;
           }
       } 
       else if (cue.state === 'stopping' && lastState !== 'stopping') {
           fadeStateTrackers.current[trackKey] = { state: 'stopping', start: performance.now(), duration: cue.fadeTime || 0 };
-          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text') {
-              if (cue.fadeTime > 0) doVolumeFade(el, el.volume, 0, cue.fadeTime);
+          if (el && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text' && cue.type !== 'msc' && cue.type !== 'osc') {
+              if (cue.fadeTime > 0) {
+                 const currentBaseVol = masterVolumeRef.current > 0 ? el.volume / masterVolumeRef.current : (cue.volume !== undefined ? cue.volume : 1);
+                 doVolumeFade(el, currentBaseVol, 0, cue.fadeTime);
+              }
           }
           if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]);
           advanceTimers.current[`stop-${cue.id}`] = setTimeout(() => {
@@ -721,7 +875,7 @@ export default function App() {
           if (el && fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
       }
       if (cue.state === 'playing' && lastState === 'playing' && el && !fadeIntervals.current[el.id]) {
-          el.volume = cue.volume !== undefined ? cue.volume : 1;
+          el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current;
       }
     });
   }, [cues, doVolumeFade]);
@@ -737,18 +891,16 @@ export default function App() {
       if (layerCanvas.width !== stageSize.w) layerCanvas.width = Math.max(1, stageSize.w);
       if (layerCanvas.height !== stageSize.h) layerCanvas.height = Math.max(1, stageSize.h);
 
-      // --- CANVAS OPTIMIZATIONS APPLIED HERE ---
       const masterCtx = masterCanvas.getContext('2d', { alpha: false, desynchronized: true, willReadFrequently: true });
       const layerCtx = layerCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
       
-      // Paint the base black to prevent ghosting since alpha is false
       masterCtx.fillStyle = '#000000';
       masterCtx.fillRect(0, 0, stageSize.w, stageSize.h);
 
       const currentCues = cuesRef.current.filter(c => c.state === 'playing' || c.state === 'stopping');
       
       currentCues.forEach(cue => {
-        if (cue.type === 'audio' || cue.type === 'goto' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time') return;
+        if (cue.type === 'audio' || cue.type === 'goto' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time' || cue.type === 'msc' || cue.type === 'osc') return;
 
         let opacity = 1;
         const tracker = fadeStateTrackers.current[cue.id];
@@ -769,7 +921,8 @@ export default function App() {
         if (!mediaEl) return;
         if (mediaEl instanceof HTMLVideoElement && mediaEl.readyState < 2) return;
 
-        masterCtx.globalAlpha = opacity;
+        const cueOpac = cue.customOpacity !== undefined ? cue.customOpacity : 1;
+        masterCtx.globalAlpha = opacity * cueOpac;
 
         if (cue.maskEnabled && cue.maskDataUrl) {
            const maskEl = document.getElementById(`master-mask-${cue.id}`);
@@ -811,7 +964,7 @@ export default function App() {
 
   useEffect(() => {
     cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => {
-      if (cue.type === 'image' || cue.type === 'goto' || cue.type === 'camera' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time' || cue.type === 'text') return;
+      if (cue.type === 'image' || cue.type === 'goto' || cue.type === 'camera' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time' || cue.type === 'text' || cue.type === 'msc' || cue.type === 'osc') return;
       const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`);
       if (el) { if (isPaused) el.pause(); else el.play().catch(e => console.log("Auto-play prevented", e)); }
     });
@@ -834,7 +987,7 @@ export default function App() {
   useEffect(() => {
     cues.forEach(cue => {
       const probeKey = `${cue.id}-${cue.url}`;
-      if (!probedCues.current.has(probeKey) && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time') {
+      if (!probedCues.current.has(probeKey) && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'msc' && cue.type !== 'osc') {
         if (cue.type === 'text') {
           probedCues.current.add(probeKey);
           setMetadata(prev => ({ ...prev, [cue.id]: { resolution: `1920x1080`, status: 'Loaded' } }));
@@ -874,7 +1027,7 @@ export default function App() {
       try {
         const loadedState = JSON.parse(event.target.result);
         if (loadedState.cues) { 
-          const hydratedCues = loadedState.cues.map(c => ({ ...c, groupId: c.groupId ?? null, groupMode: c.groupMode || 'fire-all', isExpanded: c.isExpanded ?? true, cameraLive: c.cameraLive ?? true, maskEnabled: c.maskEnabled ?? false, maskDataUrl: c.maskDataUrl ?? null, counterLimit: c.counterLimit ?? 1, counterCurrent: c.counterCurrent ?? 0, gotoMode: c.gotoMode || 'specific', targetCueRangeMin: c.targetCueRangeMin || '', targetCueRangeMax: c.targetCueRangeMax || '', scheduleDate: c.scheduleDate || '', scheduleTime: c.scheduleTime || '', textContent: c.textContent || '', textColor: c.textColor || '#ffffff', textScale: c.textScale || 100 }));
+          const hydratedCues = loadedState.cues.map(c => ({ ...c, groupId: c.groupId ?? null, groupMode: c.groupMode || 'fire-all', isExpanded: c.isExpanded ?? true, cameraLive: c.cameraLive ?? true, maskEnabled: c.maskEnabled ?? false, maskDataUrl: c.maskDataUrl ?? null, counterLimit: c.counterLimit ?? 1, counterCurrent: c.counterCurrent ?? 0, gotoMode: c.gotoMode || 'specific', targetCueRangeMin: c.targetCueRangeMin || '', targetCueRangeMax: c.targetCueRangeMax || '', scheduleDate: c.scheduleDate || '', scheduleTime: c.scheduleTime || '', textContent: c.textContent || '', textColor: c.textColor || '#ffffff', textScale: c.textScale || 100, mscDevice: c.mscDevice ?? 0, mscCommand: c.mscCommand || 'GO', mscCue: c.mscCue || '1', oscIp: c.oscIp || '127.0.0.1', oscPort: c.oscPort ?? 8000, oscAddress: c.oscAddress || '/tuxshow/go', oscArgs: c.oscArgs || '' }));
           setCues(hydratedCues); 
           if (hydratedCues.length > 0) { setSelectedCueIds([hydratedCues[0].id]); setLastSelectedId(hydratedCues[0].id); }
         }
@@ -893,7 +1046,7 @@ export default function App() {
       let type = 'video'; const name = file.name.toLowerCase();
       if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg')) type = 'audio';
       else if (file.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg')) type = 'image';
-      return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: type === 'image' ? 'none' : 'auto-follow', fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100 };
+      return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', endBehavior: type === 'image' ? 'none' : 'auto-follow', fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' };
     });
     if (newCues.length > 0) { setCues(prev => { const updated = [...prev, ...newCues]; return updated.map((c, i) => ({ ...c, number: (i + 1).toString() })); }); }
     e.target.value = ''; 
@@ -1044,7 +1197,7 @@ export default function App() {
   const masterMediaPlayers = (
     <div style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: -999 }}>
       {activeMediaCues.map(cue => {
-        if (cue.type === 'goto' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time') return null;
+        if (cue.type === 'goto' || cue.type === 'blackout' || cue.type === 'pause' || cue.type === 'counter' || cue.type === 'stop' || cue.type === 'group' || cue.type === 'time' || cue.type === 'msc' || cue.type === 'osc') return null;
         if (cue.type === 'text') return <TextMasterPlayer key={`master-text-${cue.id}`} cue={cue} />;
         if (cue.type === 'image') return <img key={`master-img-${cue.id}`} id={`master-img-${cue.id}`} src={cue.url} />;
         if (cue.type === 'camera') return <CameraMasterPlayer key={`master-cam-${cue.id}`} cue={cue} isPaused={isPaused} />;
@@ -1079,9 +1232,11 @@ export default function App() {
   const hasCamera = activeCues.some(c => c.type === 'camera');
   const hasPause = activeCues.some(c => c.type === 'pause');
   const hasBlackout = activeCues.some(c => c.type === 'blackout');
+  const hasMsc = activeCues.some(c => c.type === 'msc');
+  const hasOsc = activeCues.some(c => c.type === 'osc');
   const hasFileMedia = activeCues.some(c => c.type === 'video' || c.type === 'audio' || c.type === 'image');
   const isOnlyBlackout = activeCues.length > 0 && activeCues.every(c => c.type === 'blackout');
-  const isOnlyControl = activeCues.length > 0 && activeCues.every(c => c.type === 'goto' || c.type === 'pause' || c.type === 'counter' || c.type === 'stop' || c.type === 'group' || c.type === 'time');
+  const isOnlyControl = activeCues.length > 0 && activeCues.every(c => c.type === 'goto' || c.type === 'pause' || c.type === 'counter' || c.type === 'stop' || c.type === 'group' || c.type === 'time' || c.type === 'msc' || c.type === 'osc');
   
   const getSharedVal = (field, fallback = '') => {
     if (activeCues.length === 0) return fallback; const val = activeCues[0][field];
@@ -1115,7 +1270,6 @@ export default function App() {
       <div className="w-screen h-screen bg-black overflow-hidden relative group">
         <style>{` @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } } `}</style>
         
-        {/* IN-BROWSER EXIT BUTTON (Only shows on hover if in browser mode) */}
         {window.location.protocol === 'blob:' && (
            <button 
              onClick={() => {
@@ -1157,7 +1311,6 @@ export default function App() {
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-600 relative">
       <style>{` @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } } @keyframes meter { 0% { transform: scaleY(0.2); } 100% { transform: scaleY(1); } } `}</style>
       
-      {/* POPUP FULLSCREEN OVERLAYS */}
       {masterMediaPlayers}
       {editingMaskCueId && (
         <MaskEditorOverlay 
@@ -1182,10 +1335,51 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showSettingsModal && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 p-6 rounded shadow-2xl max-w-md w-full">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2"><Settings className="w-5 h-5 text-blue-500" /> Hardware & Network I/O</h3>
+              <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-gray-950 p-4 rounded border border-gray-800">
+                <label className="flex items-center gap-3 text-sm font-bold text-cyan-400 mb-3 cursor-pointer">
+                  <input type="checkbox" checked={ioConfig.oscInput} onChange={(e) => setIoConfig(prev => ({...prev, oscInput: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-cyan-500 accent-cyan-500 cursor-pointer" />
+                  Enable OSC Listener
+                </label>
+                <div className="flex items-center gap-4 pl-7">
+                  <label className="text-xs text-gray-400">Incoming Port:</label>
+                  <input type="number" value={ioConfig.oscPort} disabled={!ioConfig.oscInput} onChange={(e) => setIoConfig(prev => ({...prev, oscPort: parseInt(e.target.value) || 53000}))} className="w-24 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-cyan-500" />
+                </div>
+              </div>
+
+              <div className="bg-gray-950 p-4 rounded border border-gray-800">
+                <label className="flex items-center gap-3 text-sm font-bold text-purple-400 mb-3 cursor-pointer">
+                  <input type="checkbox" checked={ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscInput: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-purple-500 accent-purple-500 cursor-pointer" />
+                  Enable MSC (MIDI) Listener
+                </label>
+                <div className="flex items-center gap-4 pl-7">
+                  <label className="text-xs text-gray-400">MIDI Device Index/Name:</label>
+                  <input type="text" value={ioConfig.mscDevice} disabled={!ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscDevice: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-purple-500" placeholder="e.g. 0 or 'Launchpad'" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-800">
+              <button onClick={() => setShowSettingsModal(false)} className="px-5 py-2 rounded bg-blue-600 text-white hover:bg-blue-500 text-sm font-bold shadow-lg transition-colors">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <header className="flex items-center justify-between px-4 py-3 bg-gray-950 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
-          <Settings className="w-5 h-5 text-blue-500" />
+          <button onClick={() => setShowSettingsModal(true)} className="hover:rotate-90 transition-transform duration-300 outline-none cursor-pointer p-1 -ml-1 rounded hover:bg-gray-800/50" title="I/O Settings">
+            <Settings className="w-5 h-5 text-blue-500" />
+          </button>
           <div className="flex flex-col">
             <h1 className="font-bold tracking-widest text-gray-200 leading-tight uppercase">TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control</span></h1>
             <span className="text-[9px] text-blue-400/80 font-mono tracking-widest uppercase mt-0.5">{gpuStatus}</span>
@@ -1268,7 +1462,7 @@ export default function App() {
                 return {
                   id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url, state: 'stopped',
                   loop: false, triggerBehavior: 'stop-others', endBehavior: type === 'image' ? 'none' : 'auto-follow',
-                  fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100
+                  fadeTime: 1.0, volume: 1, autoAdvance: false, advanceTime: 0, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: '', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: ''
                 };
               });
               setCues(prev => {
@@ -1291,7 +1485,7 @@ export default function App() {
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Cue List</div>
                 <div className="flex gap-1">
                   <button onClick={() => folderInputRef.current?.click()} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="Add Folder"><FolderPlus className="w-4 h-4" /></button>
-                  <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', url: MEDIA.video1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: 'NEW TITLE', textColor: '#ffffff', textScale: 100 }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', url: MEDIA.video1, state: 'stopped', loop: false, triggerBehavior: 'overlap', endBehavior: 'none', fadeTime: 0, volume: 1, targetCueNumber: '', notes: '', cameraLive: true, maskEnabled: false, maskDataUrl: null, counterLimit: 1, counterCurrent: 0, gotoMode: 'specific', targetCueRangeMin: '', targetCueRangeMax: '', groupId: null, groupMode: 'fire-all', isExpanded: true, scheduleDate: '', scheduleTime: '', textContent: 'NEW TITLE', textColor: '#ffffff', textScale: 100, mscDevice: 0, mscCommand: 'GO', mscCue: '1', oscIp: '127.0.0.1', oscPort: 8000, oscAddress: '/tuxshow/go', oscArgs: '' }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
                   <button onClick={() => { const remaining = cues.filter(c => !selectedCueIds.includes(c.id)); setCues(remaining); setSelectedCueIds(remaining.length > 0 ? [remaining[0].id] : []); setLastSelectedId(remaining.length > 0 ? remaining[0].id : null); }} className="p-1 hover:bg-red-900/50 rounded text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
                 </div>
              </div>
@@ -1339,8 +1533,8 @@ export default function App() {
                   </div>
                   <div className="w-8 font-mono opacity-50">{cue.number}</div>
                   <div className="w-10 flex items-center justify-center gap-1">
-                    {cue.type === 'video' ? <Video className="w-4 h-4" /> : cue.type === 'image' ? <ImageIcon className="w-4 h-4" /> : cue.type === 'audio' ? <Music className="w-4 h-4" /> : cue.type === 'camera' ? <Camera className="w-4 h-4" /> : cue.type === 'blackout' ? <Moon className="w-4 h-4" /> : cue.type === 'pause' ? <PauseCircle className="w-4 h-4" /> : cue.type === 'counter' ? <Repeat className="w-4 h-4" /> : cue.type === 'stop' ? <XSquare className="w-4 h-4 text-red-500" /> : cue.type === 'group' ? (cue.isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />) : cue.type === 'time' ? <CalendarClock className="w-4 h-4 text-orange-400" /> : cue.type === 'text' ? <Type className="w-4 h-4 text-yellow-200" /> : <CornerDownRight className="w-4 h-4 text-blue-400" />}
-                    {cue.type !== 'goto' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && (cue.triggerBehavior === 'stop-others' ? <span title="Stops active cues" className="cursor-help"><StopCircle className="w-3 h-3 text-red-500 opacity-60" /></span> : <span title="Overlaps" className="cursor-help"><Layers className="w-3 h-3 text-blue-500 opacity-60" /></span>)}
+                    {cue.type === 'video' ? <Video className="w-4 h-4" /> : cue.type === 'image' ? <ImageIcon className="w-4 h-4" /> : cue.type === 'audio' ? <Music className="w-4 h-4" /> : cue.type === 'camera' ? <Camera className="w-4 h-4" /> : cue.type === 'blackout' ? <Moon className="w-4 h-4" /> : cue.type === 'pause' ? <PauseCircle className="w-4 h-4" /> : cue.type === 'counter' ? <Repeat className="w-4 h-4" /> : cue.type === 'stop' ? <XSquare className="w-4 h-4 text-red-500" /> : cue.type === 'group' ? (cue.isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />) : cue.type === 'time' ? <CalendarClock className="w-4 h-4 text-orange-400" /> : cue.type === 'text' ? <Type className="w-4 h-4 text-yellow-200" /> : cue.type === 'msc' ? <Settings2 className="w-4 h-4 text-purple-400" /> : cue.type === 'osc' ? <Wifi className="w-4 h-4 text-cyan-400" /> : <CornerDownRight className="w-4 h-4 text-blue-400" />}
+                    {cue.type !== 'goto' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'stop' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'msc' && cue.type !== 'osc' && (cue.triggerBehavior === 'stop-others' ? <span title="Stops active cues" className="cursor-help"><StopCircle className="w-3 h-3 text-red-500 opacity-60" /></span> : <span title="Overlaps" className="cursor-help"><Layers className="w-3 h-3 text-blue-500 opacity-60" /></span>)}
                   </div>
                   
                   <div className="flex-1 flex items-center font-medium truncate pr-2">
@@ -1348,6 +1542,8 @@ export default function App() {
                     {cue.type === 'counter' && <span className="ml-2 text-xs text-purple-400 font-mono tracking-widest bg-purple-900/40 px-1.5 py-0.5 rounded border border-purple-800/50">({cue.counterCurrent || 0}/{cue.counterLimit || 1}) ➔ CUE {cue.targetCueNumber || '?'}</span>}
                     {cue.type === 'stop' && <span className="ml-2 text-xs text-red-400 font-mono tracking-widest bg-red-900/40 px-1.5 py-0.5 rounded border border-red-800/50">➔ STOP CUE {cue.targetCueNumber || '?'}</span>}
                     {cue.type === 'time' && <span className="ml-2 text-[10px] text-orange-400 font-mono tracking-widest bg-orange-900/40 px-1.5 py-0.5 rounded border border-orange-800/50">➔ WAITS UNTIL {cue.scheduleDate || 'TODAY'} @ {cue.scheduleTime || '??:??'}</span>}
+                    {cue.type === 'msc' && <span className="ml-2 text-[10px] text-purple-400 font-mono tracking-widest bg-purple-900/40 px-1.5 py-0.5 rounded border border-purple-800/50">➔ DEVICE {cue.mscDevice} : {cue.mscCommand} CUE {cue.mscCue}</span>}
+                    {cue.type === 'osc' && <span className="ml-2 text-[10px] text-cyan-400 font-mono tracking-widest bg-cyan-900/40 px-1.5 py-0.5 rounded border border-cyan-800/50">➔ {cue.oscIp}:{cue.oscPort} {cue.oscAddress}</span>}
                     {cue.type === 'group' && <span className="ml-2 text-[10px] text-gray-500 font-mono uppercase border border-gray-700 px-1.5 rounded">{cue.groupMode === 'fire-all' ? 'Fire All' : 'Fire First'}</span>}
                     {cue.maskEnabled && <span title="Transparency Mask Active" className="ml-2 flex-shrink-0 cursor-help"><Crop className="w-3 h-3 text-blue-500" /></span>}
                     {cue.type === 'camera' && (<button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, cameraLive: !c.cameraLive} : c)); }} className={`ml-3 px-2 py-0.5 rounded shadow flex items-center gap-1 text-[9px] font-bold tracking-wider border transition-colors ${cue.cameraLive ? 'bg-green-900/40 border-green-500 text-green-400 hover:bg-green-800/60' : 'bg-red-900/40 border-red-500 text-red-400 hover:bg-red-800/60'}`}><div className={`w-1.5 h-1.5 rounded-full ${cue.cameraLive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />{cue.cameraLive ? 'LIVE' : 'CUT'}</button>)}
@@ -1362,14 +1558,14 @@ export default function App() {
                     <AudioVisualizer isPlaying={isPlaying || isStopping} isPaused={isPaused} type={cue.type} />
                   </div>
 
-                  {(isPlaying || isStopping) && times && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text' && (
+                  {(isPlaying || isStopping) && times && cue.type !== 'image' && cue.type !== 'goto' && cue.type !== 'camera' && cue.type !== 'blackout' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'text' && cue.type !== 'msc' && cue.type !== 'osc' && (
                     <div className="flex items-center text-[11px] font-mono px-3 whitespace-nowrap text-gray-400">
                       <span className="text-blue-400">{formatTime(times.current)}</span><span className="mx-1.5 opacity-50">/</span><span>{formatTime(times.duration)}</span>
                       <span className="ml-1.5 text-gray-500">(-{formatTime(times.duration - times.current)})</span>
                     </div>
                   )}
 
-                  <div className="w-12 flex justify-end">{(isPlaying && cue.type !== 'group') ? <button onClick={(e) => { e.stopPropagation(); stopCue(cue.id); }} className="hover:scale-110" title="Soft Stop"><Play className="w-4 h-4 text-green-500 fill-green-500" /></button> : (isStopping && cue.type !== 'group') ? <button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, state: 'stopped'} : c)); }} className="hover:scale-110" title="Hard Stop"><Square className="w-4 h-4 text-yellow-500 fill-yellow-500 animate-pulse" /></button> : <Square className="w-4 h-4 opacity-30" />}</div>
+                  <div className="w-12 flex justify-end">{(isPlaying && cue.type !== 'group' && cue.type !== 'msc' && cue.type !== 'osc') ? <button onClick={(e) => { e.stopPropagation(); stopCue(cue.id); }} className="hover:scale-110" title="Soft Stop"><Play className="w-4 h-4 text-green-500 fill-green-500" /></button> : (isStopping && cue.type !== 'group') ? <button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, state: 'stopped'} : c)); }} className="hover:scale-110" title="Hard Stop"><Square className="w-4 h-4 text-yellow-500 fill-yellow-500 animate-pulse" /></button> : <Square className="w-4 h-4 opacity-30" />}</div>
                 </div>
               );
             })}
@@ -1394,7 +1590,7 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {activeMediaCues.filter(c => c.type !== 'goto' && c.type !== 'pause' && c.type !== 'counter' && c.type !== 'group' && c.type !== 'time').length === 0 && <div className="absolute inset-0 flex items-center justify-center text-gray-800 font-mono tracking-widest pointer-events-none uppercase text-xs">Stage Preview</div>}
+              {activeMediaCues.filter(c => c.type !== 'goto' && c.type !== 'pause' && c.type !== 'counter' && c.type !== 'group' && c.type !== 'time' && c.type !== 'msc' && c.type !== 'osc').length === 0 && <div className="absolute inset-0 flex items-center justify-center text-gray-800 font-mono tracking-widest pointer-events-none uppercase text-xs">Stage Preview</div>}
               {quads.map((quad, qIdx) => {
                 const pt_tl = { x: pins[quad.indices[0]].x * stageSize.w, y: pins[quad.indices[0]].y * stageSize.h };
                 const pt_tr = { x: pins[quad.indices[1]].x * stageSize.w, y: pins[quad.indices[1]].y * stageSize.h };
@@ -1458,6 +1654,8 @@ export default function App() {
                         <option value="counter">Loop Counter</option>
                         <option value="stop">Targeted Stop</option>
                         <option value="time">Time / Scheduled</option>
+                        <option value="msc">MSC (MIDI Show Control)</option>
+                        <option value="osc">OSC (Open Sound Control)</option>
                         <option value="group">Group / Folder</option>
                       </select>
                     </div>
@@ -1587,6 +1785,54 @@ export default function App() {
                         </>
                       )}
 
+                      {hasMsc && (
+                        <div className="flex-1 flex gap-2">
+                          <div className="w-1/4">
+                            <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Device ID</label>
+                            <input type="number" min="0" max="127" value={isMixed('mscDevice') ? '' : getSharedVal('mscDevice', 0)} onChange={(e) => updateSelectedCues('mscDevice', parseInt(e.target.value) || 0)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-2 py-1.5 text-xs font-mono text-purple-100 outline-none" />
+                          </div>
+                          <div className="w-1/3">
+                            <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Command</label>
+                            <select value={isMixed('mscCommand') ? 'mixed' : getSharedVal('mscCommand', 'GO')} onChange={(e) => updateSelectedCues('mscCommand', e.target.value)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-2 py-1.5 text-xs font-mono text-purple-100 outline-none">
+                              {isMixed('mscCommand') && <option value="mixed" disabled>Mixed</option>}
+                              <option value="GO">GO</option>
+                              <option value="STOP">STOP</option>
+                              <option value="RESUME">RESUME</option>
+                              <option value="LOAD">LOAD</option>
+                            </select>
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-[10px] text-purple-400 mb-1 font-bold uppercase tracking-wider">Cue Number</label>
+                            <input type="text" value={isMixed('mscCue') ? '' : getSharedVal('mscCue', '')} placeholder="e.g. 1.5" onChange={(e) => updateSelectedCues('mscCue', e.target.value)} className="w-full bg-purple-950/30 border border-purple-800/50 rounded px-2 py-1.5 text-xs font-mono text-purple-100 outline-none" />
+                          </div>
+                        </div>
+                      )}
+
+                      {hasOsc && (
+                        <div className="flex flex-col gap-2 flex-1">
+                          <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="block text-[10px] text-cyan-400 mb-1 font-bold uppercase tracking-wider">Target IP Address</label>
+                                <input type="text" value={isMixed('oscIp') ? '' : getSharedVal('oscIp', '127.0.0.1')} placeholder="127.0.0.1" onChange={(e) => updateSelectedCues('oscIp', e.target.value)} className="w-full bg-cyan-950/30 border border-cyan-800/50 rounded px-2 py-1.5 text-xs font-mono text-cyan-100 outline-none" />
+                              </div>
+                              <div className="w-1/4">
+                                <label className="block text-[10px] text-cyan-400 mb-1 font-bold uppercase tracking-wider">Port</label>
+                                <input type="number" value={isMixed('oscPort') ? '' : getSharedVal('oscPort', 8000)} onChange={(e) => updateSelectedCues('oscPort', parseInt(e.target.value) || 8000)} className="w-full bg-cyan-950/30 border border-cyan-800/50 rounded px-2 py-1.5 text-xs font-mono text-cyan-100 outline-none" />
+                              </div>
+                          </div>
+                          <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="block text-[10px] text-cyan-400 mb-1 font-bold uppercase tracking-wider">OSC Address</label>
+                                <input type="text" value={isMixed('oscAddress') ? '' : getSharedVal('oscAddress', '/tuxshow/go')} placeholder="/eos/cue/1/fire" onChange={(e) => updateSelectedCues('oscAddress', e.target.value)} className="w-full bg-cyan-950/30 border border-cyan-800/50 rounded px-2 py-1.5 text-xs font-mono text-cyan-100 outline-none" />
+                              </div>
+                              <div className="w-1/3">
+                                <label className="block text-[10px] text-cyan-400 mb-1 font-bold uppercase tracking-wider">Arguments</label>
+                                <input type="text" value={isMixed('oscArgs') ? '' : getSharedVal('oscArgs', '')} placeholder="Optional" onChange={(e) => updateSelectedCues('oscArgs', e.target.value)} className="w-full bg-cyan-950/30 border border-cyan-800/50 rounded px-2 py-1.5 text-xs font-mono text-cyan-100 outline-none" />
+                              </div>
+                          </div>
+                        </div>
+                      )}
+
                       {!isOnlyControl && !hasText && (<div className="w-24"><label className="block text-xs text-gray-500 mb-1">Fade (sec)</label><input type="number" step="0.5" min="0" value={isMixed('fadeTime') ? '' : getSharedVal('fadeTime', 0)} onChange={(e) => updateSelectedCues('fadeTime', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 outline-none" /></div>)}
                     </div>
                   )}
@@ -1627,7 +1873,7 @@ export default function App() {
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Playback Behaviors</h3>
                     <div className="grid grid-cols-3 gap-4">
                       <div><label className="block text-xs text-gray-500 mb-1">On Trigger</label><select value={isMixed('triggerBehavior') ? 'mixed' : getSharedVal('triggerBehavior', 'overlap')} onChange={(e) => updateSelectedCues('triggerBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none">{isMixed('triggerBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="overlap">Overlap (Play on top)</option><option value="stop-others">Hard Stop</option></select></div>
-                      <div><label className="block text-xs text-gray-500 mb-1">Media End</label><select disabled={hasImage || hasCamera || hasBlackout || hasPause || hasGoto || hasStop || hasTime || hasText} value={isMixed('endBehavior') ? 'mixed' : getSharedVal('endBehavior', 'none')} onChange={(e) => updateSelectedCues('endBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none disabled:opacity-30">{isMixed('endBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="none">Stop Playback</option><option value="auto-follow">Auto-Follow</option></select></div>
+                      <div><label className="block text-xs text-gray-500 mb-1">Media End</label><select disabled={hasImage || hasCamera || hasBlackout || hasPause || hasGoto || hasStop || hasTime || hasText || hasMsc || hasOsc} value={isMixed('endBehavior') ? 'mixed' : getSharedVal('endBehavior', 'none')} onChange={(e) => updateSelectedCues('endBehavior', e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none disabled:opacity-30">{isMixed('endBehavior') && <option value="mixed" disabled>Mixed Behaviors</option>}<option value="none">Stop Playback</option><option value="auto-follow">Auto-Follow</option></select></div>
                       <div><label className="flex items-center gap-2 text-xs text-gray-500 mb-1 cursor-pointer"><input type="checkbox" ref={el => { if(el) el.indeterminate = isMixed('autoAdvance') }} checked={getSharedVal('autoAdvance', false)} onChange={(e) => updateSelectedCues('autoAdvance', e.target.checked)} className="w-3 h-3 accent-blue-500" disabled={hasTime} />Auto-Advance</label><div className="flex items-center gap-2"><input type="number" step="0.5" min="0" disabled={isMixed('autoAdvance') ? false : !getSharedVal('autoAdvance', false)} value={isMixed('advanceTime') ? '' : getSharedVal('advanceTime', 0)} onChange={(e) => updateSelectedCues('advanceTime', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 outline-none disabled:opacity-30" /><span className="text-xs text-gray-500">sec</span></div></div>
                     </div>
                   </div>
@@ -1643,8 +1889,8 @@ export default function App() {
                         return (
                           <>
                             <div className="grid grid-cols-3 gap-4">
-                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Resolution</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.resolution || (activeCue?.type === 'audio' || activeCue?.type === 'group' ? 'N/A' : (activeCue?.type === 'text' ? '1920x1080' : 'Pending...'))}</div></div>
-                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Duration</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.duration ? formatTime(metadata[activeCue.id].duration) : (activeCue?.type === 'image' || activeCue?.type === 'camera' || activeCue?.type === 'text' || isOnlyControl || isOnlyBlackout ? 'Infinite' : 'Pending...')}</div></div>
+                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Resolution</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.resolution || (activeCue?.type === 'audio' || activeCue?.type === 'group' || activeCue?.type === 'msc' || activeCue?.type === 'osc' ? 'N/A' : (activeCue?.type === 'text' ? '1920x1080' : 'Pending...'))}</div></div>
+                              <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Duration</div><div className="text-sm font-mono text-gray-300">{metadata[activeCue?.id]?.duration ? formatTime(metadata[activeCue.id].duration) : (activeCue?.type === 'image' || activeCue?.type === 'camera' || activeCue?.type === 'text' || isOnlyControl || isOnlyBlackout ? 'Instant / Hold' : 'Pending...')}</div></div>
                               <div><div className="text-[10px] text-gray-500 uppercase mb-0.5">Status</div><div className="flex items-center gap-1.5 text-sm font-mono text-gray-300"><div className={`w-2 h-2 rounded-full ${metadata[activeCue?.id]?.status === 'Loaded' || activeCue?.type === 'camera' || activeCue?.type === 'text' || isOnlyControl || isOnlyBlackout ? 'bg-green-500' : metadata[activeCue?.id]?.status === 'Error' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>{activeCue?.type === 'camera' ? 'Active' : activeCue?.type === 'text' ? 'Generated' : isOnlyControl || isOnlyBlackout ? 'Ready' : metadata[activeCue?.id]?.status || 'Probing...'}</div></div>
                             </div>
                             <div className="border-t border-gray-800/80 pt-3 grid grid-cols-3 gap-4">
@@ -1664,6 +1910,24 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* BOTTOM STATUS BAR */}
+      <div className="bg-gray-950 border-t border-gray-800 px-4 py-1.5 flex justify-between items-center text-[10px] font-mono tracking-widest text-gray-500 shrink-0 z-50">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5 text-blue-400/80"><Wifi className="w-3 h-3" /> HOST IP: {localIp}</span>
+        </div>
+        <div className="flex items-center gap-6">
+          <span className={`flex items-center gap-1.5 ${ioConfig.oscInput ? 'text-cyan-400' : 'text-gray-600'}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${ioConfig.oscInput ? 'bg-cyan-500 animate-pulse shadow-[0_0_5px_rgba(6,182,212,0.8)]' : 'bg-gray-700'}`}></div>
+            OSC RX: {ioConfig.oscInput ? `PORT ${ioConfig.oscPort}` : 'OFFLINE'}
+          </span>
+          <span className={`flex items-center gap-1.5 ${ioConfig.mscInput ? 'text-purple-400' : 'text-gray-600'}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${ioConfig.mscInput ? 'bg-purple-500 animate-pulse shadow-[0_0_5px_rgba(168,85,247,0.8)]' : 'bg-gray-700'}`}></div>
+            MSC RX: {ioConfig.mscInput ? `DEV [${ioConfig.mscDevice}]` : 'OFFLINE'}
+          </span>
+        </div>
+      </div>
+
     </div>
   );
 }
