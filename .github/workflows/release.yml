@@ -28,11 +28,11 @@ jobs:
 
       # Install ALSA/MIDI system dependencies needed to compile 'easymidi'
       - name: Install System Dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config build-essential
 
       # 5. Install the project dependencies (just like you do on your laptop)
       - name: Install Dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       # 6. Run your build script to generate the .deb file in the release/ folder
       - name: Build the .deb Installer
