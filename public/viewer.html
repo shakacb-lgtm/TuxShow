@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TuxShow | Live View</title>
+    <link rel="manifest" href="/manifest-view.json">
+    <link rel="icon" type="image/png" href="/icon.png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #000; color: #fff; overflow: hidden; }
+        video { object-fit: contain; }
+    </style>
+</head>
+<body class="w-screen h-screen relative flex items-center justify-center">
+    
+    <div id="overlay" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm gap-4">
+        <h1 class="font-bold tracking-widest text-gray-200 uppercase text-2xl">Live Stream</h1>
+        <p id="statusTxt" class="text-sm text-gray-400 font-mono text-center max-w-sm">Ready to connect to the TuxShow broadcaster.</p>
+        <button id="startBtn" class="mt-4 bg-blue-600 hover:bg-blue-500 active:scale-95 transition-transform text-white font-bold py-3 px-8 rounded-full shadow-[0_0_15px_rgba(37,99,235,0.4)] text-sm uppercase tracking-wider">
+            Click to View Stream
+        </button>
+    </div>
+
+    <video id="vid" autoplay playsinline muted class="absolute inset-0 w-full h-full z-10"></video>
+    
+    <script src="/viewer.js"></script>
+</body>
+</html>

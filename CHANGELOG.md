@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+[1.2.0] - 2026-05-21
+
+Added
+
+Media Sync Offset: Added a precise timing slider for Audio and Video cues. Cues can be positively offset to skip ahead into a track, or negatively offset to introduce a pre-wait delay, allowing for exact synchronization between separate AV elements.
+
+Conditional Logic Cues: Introduced the "If/Then/Else" Conditional cue type. Cues can now evaluate network OSC payload values or check the playback status of other cues on the timeline, automatically branching playback to different paths based on the result.
+
+Timer Cues: A new generative cue type that renders real-time Countup and Countdown clocks directly onto the projection canvas. Timers inherit the complete typography styling suite built for Text cues.
+
+Color Correction Pipeline: Visual cues now support real-time hardware-accelerated HSB (Hue, Saturation, Brightness) color filtering directly via the Inspector panel.
+
+Fixed
+
+Group Hierarchy Integrity: Completely rewrote the Drag-and-Drop system logic. When dragging a cue onto a Group Folder in the cue list, it now strictly adopts the folder's groupId and is forced physically inside the folder's dropdown hierarchy in the tree structure, rather than floating ambiguously adjacent to it.
+
 [1.1.0] - 2026-05-17
 
 Added

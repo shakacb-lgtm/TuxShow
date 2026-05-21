@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { 
   Play, Square, Video, Music, ChevronRight, ChevronDown, Plus, Trash2, 
   ArrowRight, Layers, StopCircle, GripVertical, Image as ImageIcon, FolderOpen, 
@@ -60,7 +60,7 @@ const getNativeFilePath = (file) => {
 // ============================================================================
 // SUB-COMPONENTS
 // ============================================================================
-const AudioVisualizer = React.memo(({ isPlaying, isPaused, type }) => {
+const AudioVisualizer = ({ isPlaying, isPaused, type }) => {
   if (!isPlaying || ['image', 'goto', 'pause', 'blackout', 'counter', 'transition', 'group', 'time', 'text', 'msc', 'osc', 'stop', 'conditional', 'timer'].includes(type)) return null;
   return (
     <div className="flex items-end gap-[2px] h-3 ml-3 shrink-0" title={isPaused ? "Audio Paused" : "Audio Playing"}>
@@ -69,9 +69,9 @@ const AudioVisualizer = React.memo(({ isPlaying, isPaused, type }) => {
       <div className="w-[3px] bg-green-500 rounded-t-sm origin-bottom" style={{ animation: `meter 0.5s ease-in-out infinite alternate 0.4s ${isPaused ? 'paused' : 'running'}`, height: '100%' }} />
     </div>
   );
-});
+};
 
-const AutoAdvanceTimer = React.memo(({ cue, isPlaying, isPaused }) => {
+const AutoAdvanceTimer = ({ cue, isPlaying, isPaused }) => {
   const [timeLeft, setTimeLeft] = useState(cue.duration || 0);
 
   useEffect(() => {
@@ -95,9 +95,9 @@ const AutoAdvanceTimer = React.memo(({ cue, isPlaying, isPaused }) => {
       ⏱ {(isPlaying && !isPaused && cue.duration > 0) ? timeLeft.toFixed(1) : (cue.duration || 0)}s
     </span>
   );
-});
+};
 
-const VideoStats = React.memo(({ videoId, name }) => {
+const VideoStats = ({ videoId, name }) => {
   const [fps, setFps] = useState(0);
   const [res, setRes] = useState("Loading...");
   
@@ -132,9 +132,9 @@ const VideoStats = React.memo(({ videoId, name }) => {
       <span>FPS: {fps}</span><span>RES: {res}</span>
     </div>
   );
-});
+};
 
-const WarpEditorOverlay = React.memo(({ cue, onClose, onSave }) => {
+const WarpEditorOverlay = ({ cue, onClose, onSave }) => {
   const [pins, setPins] = useState(cue.warpPins || [{x:0,y:0}, {x:1,y:0}, {x:1,y:1}, {x:0,y:1}]);
   const svgRef = useRef(null);
 
@@ -167,9 +167,9 @@ const WarpEditorOverlay = React.memo(({ cue, onClose, onSave }) => {
       </div>
     </div>
   );
-});
+};
 
-const MaskEditorOverlay = React.memo(({ cue, onClose, onSave }) => {
+const MaskEditorOverlay = ({ cue, onClose, onSave }) => {
   const [polygons, setPolygons] = useState([]); 
   const [currentPoints, setCurrentPoints] = useState([]); 
   const [mousePos, setMousePos] = useState(null);
@@ -248,74 +248,25 @@ const MaskEditorOverlay = React.memo(({ cue, onClose, onSave }) => {
       </div>
     </div>
   );
-});
+};
 
-const CameraMasterPlayer = React.memo(({ cue, isPaused }) => {
+const CameraMasterPlayer = ({ cue, isPaused }) => {
   const videoRef = useRef(null);
-  const rtcConnectionRef = useRef(null);
   useEffect(() => {
     let stream = null;
     const startCamera = async () => {
       if ((cue.state === 'playing' || cue.state === 'stopping') && cue.cameraLive) {
         try {
-          if (cue.url && (cue.url.startsWith('rtsp://') || cue.url.startsWith('http'))) {
-            if (videoRef.current) { 
-              videoRef.current.srcObject = null; 
-              videoRef.current.src = cue.url; 
-              if (isPaused) videoRef.current.pause(); else videoRef.current.play().catch(()=>{});
-            }
-          } else if (cue.url && cue.url.startsWith('webrtc://')) {
-            // Network WebRTC Capture
-            const pc = new RTCPeerConnection({ iceServers: [] });
-            rtcConnectionRef.current = pc;
-            pc.addTransceiver('video', { direction: 'recvonly' });
-            
-            pc.ontrack = (e) => {
-                if (videoRef.current) {
-                    videoRef.current.srcObject = e.streams[0];
-                    if (!isPaused) videoRef.current.play().catch(()=>{});
-                }
-            };
-
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-
-            // Wait for ICE gathering to complete locally
-            await new Promise(resolve => {
-                if (pc.iceGatheringState === 'complete') resolve();
-                else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-            });
-
-            let res;
-            try {
-                const fetchUrlHttps = cue.url.replace('webrtc://', 'https://');
-                res = await fetch(fetchUrlHttps, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription }) });
-            } catch (httpsErr) {
-                const fetchUrlHttp = cue.url.replace('webrtc://', 'http://');
-                res = await fetch(fetchUrlHttp, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription }) });
-            }
-            
-            if (res && res.ok) {
-                const answer = await res.json();
-                await pc.setRemoteDescription(answer.sdp);
-            }
-          } else if (cue.url === 'mobile-camera') {
-            const connectMobileCam = () => {
-                if (window.__mobileCamStream && videoRef.current) {
-                    videoRef.current.srcObject = window.__mobileCamStream;
-                    if (!isPaused) videoRef.current.play().catch(()=>{});
-                }
-            };
-            connectMobileCam();
-            window.addEventListener('mobile-cam-ready', connectMobileCam);
+          if (cue.url && (cue.url.startsWith('omt://') || cue.url.startsWith('rtsp://') || cue.url.startsWith('http'))) {
+            if (videoRef.current) { videoRef.current.srcObject = null; videoRef.current.src = cue.url; if (isPaused) videoRef.current.pause(); }
           } else {
             if (cue.url && cue.url.length > 5 && !cue.url.includes('.mp4')) {
               try { stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: cue.url } } }); } 
               catch (fallbackErr) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); }
             } else stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            if (videoRef.current && stream) { videoRef.current.src = ""; videoRef.current.srcObject = stream; if (isPaused) videoRef.current.pause(); else videoRef.current.play().catch(()=>{}); }
+            if (videoRef.current && stream) { videoRef.current.src = ""; videoRef.current.srcObject = stream; if (isPaused) videoRef.current.pause(); }
           }
-        } catch (err) { console.error("Camera Setup Error:", err); }
+        } catch (err) {}
       } else {
         if (videoRef.current) {
           if (videoRef.current.srcObject) { videoRef.current.srcObject.getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
@@ -324,12 +275,7 @@ const CameraMasterPlayer = React.memo(({ cue, isPaused }) => {
       }
     };
     startCamera();
-    const safeConnectRef = cue.url === 'mobile-camera' ? () => window.removeEventListener('mobile-cam-ready', () => {}) : null;
-    return () => { 
-      if (stream) stream.getTracks().forEach(t => t.stop()); 
-      if (rtcConnectionRef.current) { rtcConnectionRef.current.close(); rtcConnectionRef.current = null; }
-      if (safeConnectRef) window.removeEventListener('mobile-cam-ready', safeConnectRef);
-    };
+    return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
   }, [cue.state, cue.cameraLive, cue.url, isPaused]);
 
   useEffect(() => {
@@ -339,9 +285,9 @@ const CameraMasterPlayer = React.memo(({ cue, isPaused }) => {
   }, [isPaused]);
 
   return <video id={`master-cam-${cue.id}`} ref={videoRef} autoPlay playsInline muted crossOrigin="anonymous" className="hidden" />;
-});
+};
 
-const ChromaKeyFilter = React.memo(({ cue }) => {
+const ChromaKeyFilter = ({ cue }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
      const canvas = canvasRef.current;
@@ -389,9 +335,9 @@ const ChromaKeyFilter = React.memo(({ cue }) => {
      return () => cancelAnimationFrame(animId);
   }, [cue.id, cue.type, cue.chromaKeyColor, cue.chromaKeySimilarity, cue.chromaKeySmoothness]);
   return <canvas id={`master-chroma-${cue.id}`} ref={canvasRef} className="hidden" />;
-});
+};
 
-const TextMasterPlayer = React.memo(({ cue }) => {
+const TextMasterPlayer = ({ cue }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -436,9 +382,9 @@ const TextMasterPlayer = React.memo(({ cue }) => {
     cue.textShadowOffsetY, cue.textSmoothing
   ]);
   return <canvas id={`master-text-${cue.id}`} ref={canvasRef} className="hidden" />;
-});
+};
 
-const TimerMasterPlayer = React.memo(({ cue, fadeStateTrackers }) => {
+const TimerMasterPlayer = ({ cue, fadeStateTrackers }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -508,70 +454,9 @@ const TimerMasterPlayer = React.memo(({ cue, fadeStateTrackers }) => {
     return () => cancelAnimationFrame(animId);
   }, [cue, fadeStateTrackers]);
   return <canvas id={`master-timer-${cue.id}`} ref={canvasRef} className="hidden" />;
-});
+};
 
-const MediaInfoBox = React.memo(({ cue }) => {
-  const [info, setInfo] = useState(null);
-
-  useEffect(() => {
-    if (!cue || !cue.url || !['video', 'audio', 'image'].includes(cue.type)) {
-      setInfo(null);
-      return;
-    }
-    
-    let isMounted = true;
-    let retries = 0;
-
-    const checkInfo = () => {
-       if (!isMounted) return;
-       const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : (cue.type === 'audio' ? 'aud' : 'img')}-${cue.id}`);
-       if (!el && retries < 20) { retries++; setTimeout(checkInfo, 500); return; }
-       
-       let res = 'N/A'; let duration = 'N/A';
-       
-       if (el) {
-           if (cue.type === 'video' && el.readyState >= 1) { res = `${el.videoWidth}x${el.videoHeight}`; duration = formatTime(el.duration); }
-           else if (cue.type === 'image' && el.complete && el.naturalWidth) { res = `${el.naturalWidth}x${el.naturalHeight}`; }
-           else if (cue.type === 'audio' && el.readyState >= 1) { duration = formatTime(el.duration); }
-           else if (retries < 20) { retries++; setTimeout(checkInfo, 500); return; }
-       }
-       
-       let pathname = cue.url;
-       try { if (cue.url.startsWith('file://')) { const urlObj = new URL(cue.url); pathname = decodeURIComponent(urlObj.pathname); } } catch(e) {}
-       
-       let filename = pathname.split(/[/\\]/).pop() || '';
-       const extMatch = filename.match(/\.([a-zA-Z0-9]+)$/);
-       const ext = extMatch ? extMatch[1].toUpperCase() : 'UNKNOWN';
-       const pathStr = pathname.substring(0, pathname.lastIndexOf(filename)) || '/';
-       
-       setInfo({ filename, path: pathStr, res, duration, ext, type: cue.type });
-    };
-    
-    checkInfo();
-    return () => { isMounted = false; };
-  }, [cue]);
-
-  if (!info) return null;
-
-  return (
-      <div className="col-span-2 bg-gray-950/80 border border-gray-800 p-3 rounded mt-2 text-[10px] text-gray-400 font-mono space-y-1 relative overflow-hidden">
-         <div className="absolute right-0 top-0 text-[40px] font-bold text-gray-800/30 leading-none pointer-events-none select-none -mt-2 -mr-1">{info.ext}</div>
-         <div className="flex items-center gap-2 border-b border-gray-800 pb-1.5 mb-1.5 text-gray-300 font-bold uppercase tracking-wider">
-             <Activity className="w-3 h-3 text-blue-500" /> Media Information
-         </div>
-         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 relative z-10">
-             <div className="truncate col-span-2" title={info.filename}><span className="text-gray-500">File:</span> <span className="text-gray-200">{info.filename}</span></div>
-             <div><span className="text-gray-500">Type:</span> <span className="text-blue-300">{info.type.toUpperCase()} / {info.ext}</span></div>
-             <div className="truncate" title={info.path}><span className="text-gray-500">Path:</span> {info.path}</div>
-             {info.type !== 'audio' && <div><span className="text-gray-500">Resolution:</span> <span className="text-gray-200">{info.res}</span></div>}
-             {info.type !== 'image' && <div><span className="text-gray-500">Length:</span> <span className="text-gray-200">{info.duration}</span></div>}
-             <div><span className="text-gray-500">Decoder:</span> <span className="text-gray-400 italic">Native Browser</span></div>
-         </div>
-      </div>
-  );
-});
-
-const Header = React.memo(function Header({
+function Header({
   setShowSettingsModal, gpuStatus, setShowNewModal, fileInputRef, folderInputRef, 
   handleSaveShow, handleLoadShow, handleAddFolder, selectedCueIds, cues, 
   isMappingMode, setIsMappingMode, handleResetPins, gridSize, setGridSize, setPins, 
@@ -625,9 +510,9 @@ const Header = React.memo(function Header({
       </div>
     </header>
   );
-});
+}
 
-const CueList = React.memo(function CueList({
+function CueList({
   cues, setCues, selectedCueIds, setSelectedCueIds, setLastSelectedId, 
   getNativeFilePath, folderInputRef, isVisible, getIndent, handleCueClick, 
   mediaTimes, isPaused, setIsPaused, stopCue, handleGo, handleStopAll, handleRenumberCues
@@ -739,7 +624,7 @@ const CueList = React.memo(function CueList({
             <div className="flex gap-1">
               <button onClick={handleRenumberCues} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="Renumber All Cues"><Hash className="w-4 h-4" /></button>
               <button onClick={() => folderInputRef.current?.click()} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="Add Folder"><FolderPlus className="w-4 h-4" /></button>
-              <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', description: '', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', followAction: 'none', duration: 0, fadeInTime: 0, fadeOutTime: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
+              <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', followAction: 'none', duration: 0, fadeInTime: 0, fadeOutTime: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
               <button onClick={() => { const remaining = cues.filter(c => !selectedCueIds.includes(c.id)); setCues(remaining); setSelectedCueIds(remaining.length > 0 ? [remaining[0].id] : []); setLastSelectedId(remaining.length > 0 ? remaining[0].id : null); }} className="p-1 hover:bg-red-900/50 rounded text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
             </div>
          </div>
@@ -801,12 +686,11 @@ const CueList = React.memo(function CueList({
       </div>
     </div>
   );
-});
+}
 
-const Inspector = React.memo(function Inspector({ 
+function Inspector({ 
   cues, setCues, selectedCueIds, activeCues, isMixed, getSharedVal, updateSelectedCues, 
-  getNativeFilePath, videoDevices, hardwareDisplays, setEditingMaskCueId, setEditingWarpCueId,
-  handleUrlBlur
+  getNativeFilePath, videoDevices, hardwareDisplays, setEditingMaskCueId, setEditingWarpCueId
 }) {
   return (
     <div className="h-1/3 bg-gray-900 flex flex-col shrink-0 overflow-hidden">
@@ -882,23 +766,21 @@ const Inspector = React.memo(function Inspector({
                   <input type="text" value={isMixed('url') ? '' : getSharedVal('url', '')} placeholder={isMixed('url') ? '<Multiple Values>' : ''} onChange={(e) => updateSelectedCues('url', e.target.value)} className="flex-1 bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-xs font-mono text-gray-200 outline-none" />
                   <button onClick={() => { const input = document.createElement('input'); input.type='file'; input.onchange=(e)=>{const file=e.target.files[0]; if(file){ updateSelectedCues('url', getNativeFilePath(file)); updateSelectedCues('name', file.name); }}; input.click(); }} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-4 py-1.5 text-xs font-semibold text-gray-300 transition-colors cursor-pointer">Browse File</button>
                 </div>
-                {!isMixed('url') && activeCues.length === 1 && <MediaInfoBox cue={activeCues[0]} />}
               </div>
             )}
             {getSharedVal('type') === 'camera' && (
               <div className="col-span-2 flex gap-4">
                  <div className="flex-1">
                     <label className="block text-xs text-gray-500 mb-1">Hardware Capture Device</label>
-                    <select value={isMixed('url') ? 'mixed' : (getSharedVal('url', '').startsWith('http') || getSharedVal('url', '').startsWith('rtsp') || getSharedVal('url', '').startsWith('webrtc') ? '' : getSharedVal('url', ''))} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-2 py-1.5 text-sm font-mono text-gray-200 outline-none">
+                    <select value={isMixed('url') ? 'mixed' : getSharedVal('url', '')} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-2 py-1.5 text-sm font-mono text-gray-200 outline-none">
                       {isMixed('url') && <option value="mixed" disabled hidden>-- Mixed Devices --</option>}
                       <option value="">Default System Camera</option>
-                      <option value="mobile-camera">Mobile App Camera (PWA)</option>
                       {videoDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.slice(0,5)}...)`}</option>)}
                     </select>
                  </div>
                  <div className="flex-1">
-                    <label className="block text-xs text-gray-500 mb-1">Network Stream URL (WebRTC/HTTP/RTSP)</label>
-                    <input list="url-history" type="text" placeholder={isMixed('url') ? '<Multiple Values>' : "webrtc://127.0.0.1:8554/display1"} value={isMixed('url') ? '' : (!getSharedVal('url', '').includes('://') && getSharedVal('url', '').length > 15 ? '' : getSharedVal('url', ''))} onChange={(e) => updateSelectedCues('url', e.target.value)} onBlur={(e) => handleUrlBlur(e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-xs font-mono text-gray-200 outline-none" />
+                    <label className="block text-xs text-gray-500 mb-1">Or Network Stream (OMT/RTSP/HTTP)</label>
+                    <input type="text" placeholder={isMixed('url') ? '<Multiple Values>' : "omt://..."} value={isMixed('url') ? '' : (!getSharedVal('url', '').includes('://') && getSharedVal('url', '').length > 15 ? '' : getSharedVal('url', ''))} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-xs font-mono text-gray-200 outline-none" />
                  </div>
               </div>
             )}
@@ -909,7 +791,6 @@ const Inspector = React.memo(function Inspector({
                   <select value={isMixed('targetDisplay') ? 'mixed' : getSharedVal('targetDisplay', 'all')} onChange={(e) => updateSelectedCues('targetDisplay', e.target.value)} className="w-full bg-blue-950/20 border border-blue-800/40 rounded px-2 py-1.5 text-sm font-mono text-blue-200 outline-none focus:border-blue-500">
                     {isMixed('targetDisplay') && <option value="mixed" disabled hidden>-- Mixed Displays --</option>}
                     <option value="all">All Displays</option>
-                    <option value="webrtc">Virtual WebRTC Output Only</option>
                     {hardwareDisplays.map(d => (<option key={d.id} value={d.id}>{d.label} {d.isPrimary ? '(Primary)' : ''}</option>))}
                   </select>
                 </div>
@@ -1334,44 +1215,33 @@ const Inspector = React.memo(function Inspector({
               </div>
             )}
 
-            {['video', 'image', 'camera', 'text', 'timer'].includes(getSharedVal('type')) && (
+            {['video', 'image', 'camera'].includes(getSharedVal('type')) && (
               <>
                 <div className="col-span-2 bg-gray-950/50 p-4 rounded border border-gray-800 space-y-4">
-                  <h4 className="text-xs font-bold text-yellow-500 uppercase tracking-wider flex items-center gap-2"><Palette className="w-4 h-4"/> Color & Opacity</h4>
-                  
-                  <div className="flex items-center gap-2">
-                      <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider w-16">Opacity</label>
-                      <input type="range" min="0" max="1" step="0.05" value={isMixed('customOpacity') ? 1 : (getSharedVal('customOpacity') ?? 1)} onChange={(e) => updateSelectedCues('customOpacity', parseFloat(e.target.value))} className="flex-1 accent-blue-500" />
-                      <span className="text-xs text-gray-400 w-8 text-right">{isMixed('customOpacity') ? '--' : `${Math.round((getSharedVal('customOpacity') ?? 1) * 100)}%`}</span>
+                  <h4 className="text-xs font-bold text-yellow-500 uppercase tracking-wider flex items-center gap-2"><Palette className="w-4 h-4"/> Color Correction (HSB)</h4>
+                  <div className="flex items-center gap-4 border-b border-gray-800 pb-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                       <input type="checkbox" checked={getSharedVal('colorFilterEnabled', false)} onChange={(e) => updateSelectedCues('colorFilterEnabled', e.target.checked)} className="w-4 h-4 bg-gray-900 border-gray-700 rounded text-yellow-500 focus:ring-yellow-500" /> 
+                       Enable Hardware Filter
+                    </label>
                   </div>
-
-                  {['video', 'image', 'camera'].includes(getSharedVal('type')) && (
-                    <div className="space-y-4 pt-4 border-t border-gray-800">
-                      <div className="flex items-center gap-4">
-                        <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                          <input type="checkbox" checked={getSharedVal('colorFilterEnabled', false)} onChange={(e) => updateSelectedCues('colorFilterEnabled', e.target.checked)} className="w-4 h-4 bg-gray-900 border-gray-700 rounded text-yellow-500 focus:ring-yellow-500" /> 
-                          Enable Color Correction (HSB)
-                        </label>
-                      </div>
-                      {getSharedVal('colorFilterEnabled') && (
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-gray-400 font-bold uppercase">Hue Shift (deg)</label>
-                              <input type="range" min="0" max="360" value={isMixed('hue') ? 0 : getSharedVal('hue', 0)} onChange={(e) => updateSelectedCues('hue', parseInt(e.target.value))} className="w-full accent-yellow-500" />
-                              <span className="text-xs text-gray-500">{getSharedVal('hue', 0)}°</span>
-                          </div>
-                          <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-gray-400 font-bold uppercase">Saturation %</label>
-                              <input type="range" min="0" max="200" value={isMixed('saturation') ? 100 : getSharedVal('saturation', 100)} onChange={(e) => updateSelectedCues('saturation', parseInt(e.target.value))} className="w-full accent-yellow-500" />
-                              <span className="text-xs text-gray-500">{getSharedVal('saturation', 100)}%</span>
-                          </div>
-                          <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-gray-400 font-bold uppercase">Brightness %</label>
-                              <input type="range" min="0" max="200" value={isMixed('brightness') ? 100 : getSharedVal('brightness', 100)} onChange={(e) => updateSelectedCues('brightness', parseInt(e.target.value))} className="w-full accent-yellow-500" />
-                              <span className="text-xs text-gray-500">{getSharedVal('brightness', 100)}%</span>
-                          </div>
-                        </div>
-                      )}
+                  {getSharedVal('colorFilterEnabled') && (
+                    <div className="grid grid-cols-3 gap-4">
+                       <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase">Hue Shift (deg)</label>
+                          <input type="range" min="0" max="360" value={isMixed('hue') ? 0 : getSharedVal('hue', 0)} onChange={(e) => updateSelectedCues('hue', parseInt(e.target.value))} className="w-full accent-yellow-500" />
+                          <span className="text-xs text-gray-500">{getSharedVal('hue', 0)}°</span>
+                       </div>
+                       <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase">Saturation %</label>
+                          <input type="range" min="0" max="200" value={isMixed('saturation') ? 100 : getSharedVal('saturation', 100)} onChange={(e) => updateSelectedCues('saturation', parseInt(e.target.value))} className="w-full accent-yellow-500" />
+                          <span className="text-xs text-gray-500">{getSharedVal('saturation', 100)}%</span>
+                       </div>
+                       <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-gray-400 font-bold uppercase">Brightness %</label>
+                          <input type="range" min="0" max="200" value={isMixed('brightness') ? 100 : getSharedVal('brightness', 100)} onChange={(e) => updateSelectedCues('brightness', parseInt(e.target.value))} className="w-full accent-yellow-500" />
+                          <span className="text-xs text-gray-500">{getSharedVal('brightness', 100)}%</span>
+                       </div>
                     </div>
                   )}
                 </div>
@@ -1486,19 +1356,14 @@ const Inspector = React.memo(function Inspector({
                 )}
               </div>
             )}
-
-            <div className="col-span-2 bg-gray-950/50 p-4 rounded border border-gray-800 space-y-2 mt-2">
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2"><Edit3 className="w-4 h-4"/> Cue Notes / Description</label>
-              <textarea value={isMixed('description') ? '' : getSharedVal('description', '')} placeholder={isMixed('description') ? '<Multiple Values>' : 'Enter media details or cue notes here...'} onChange={(e)=>updateSelectedCues('description', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-blue-500 rounded px-3 py-2 text-sm text-gray-300 outline-none h-20 custom-scrollbar resize-y" />
-            </div>
           </div>
         </div>
       ) : <div className="flex-1 flex items-center justify-center text-sm text-gray-600">Select a cue to inspect.</div>}
     </div>
   );
-});
+}
 
-const StagePreview = React.memo(function StagePreview({
+function StagePreview({
   stageRef, activeMediaCues, pins, gridSize, stageSize, quadW, quadH,
   isMappingMode, handlePinDrag, showStats
 }) {
@@ -1542,17 +1407,17 @@ const StagePreview = React.memo(function StagePreview({
       </div>
     </div>
   );
-});
+}
 
-const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig, ioConfig }) {
+function StatusBar({ localIp, virtualDisplayConfig, ioConfig }) {
   return (
     <div className="bg-gray-950 border-t border-gray-800 px-4 py-1.5 flex justify-between items-center text-[10px] font-mono tracking-widest text-gray-500 shrink-0 z-50">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5 text-blue-400/80">
           <Wifi className="w-3 h-3" /> HOST IP: {localIp}
         </span>
-        <span className={`flex items-center gap-1.5 ${virtualDisplayConfig.enabled ? 'text-pink-400/80' : 'text-gray-600'} truncate`} title={`Receiver: webrtc://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}\nBrowser: https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}\nCamera: https://${localIp}:${virtualDisplayConfig.port}/camera`}>
-          <Cast className="w-3 h-3" /> STREAM: {virtualDisplayConfig.enabled ? `RECV: webrtc://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path} | WEB: https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}` : 'OFF'}
+        <span className={`flex items-center gap-1.5 ${virtualDisplayConfig.enabled ? 'text-pink-400/80' : 'text-gray-600'}`}>
+          <Cast className="w-3 h-3" /> VIRTUAL HTTP: {virtualDisplayConfig.enabled ? `ON (http://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path})` : 'OFF'}
         </span>
       </div>
       <div className="flex items-center gap-6">
@@ -1567,109 +1432,7 @@ const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig,
       </div>
     </div>
   );
-});
-
-// ============================================================================
-// DEDICATED RECEIVER MODE
-// ============================================================================
-const DedicatedReceiver = React.memo(({ url }) => {
-  const videoRef = useRef(null);
-  const rtcConnectionRef = useRef(null);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
-
-  useEffect(() => {
-    let reconnectTimeout = null;
-    let isActive = true;
-
-    const connectWebRTC = async () => {
-      if (!isActive) return;
-      try {
-        setErrorMsg('');
-        const pc = new RTCPeerConnection({ iceServers: [] });
-        rtcConnectionRef.current = pc;
-        pc.addTransceiver('video', { direction: 'recvonly' });
-        
-        pc.ontrack = (e) => {
-            if (videoRef.current) {
-                videoRef.current.srcObject = e.streams[0];
-                videoRef.current.play().catch(()=>{});
-            }
-        };
-        
-        pc.oniceconnectionstatechange = () => {
-            if (pc.iceConnectionState === 'connected') setIsConnected(true);
-            else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-                setIsConnected(false);
-                if (isActive) reconnectTimeout = setTimeout(connectWebRTC, 2000);
-            }
-        };
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        await new Promise(resolve => {
-            if (pc.iceGatheringState === 'complete') resolve();
-            else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-        });
-
-        let res;
-        try {
-            const fetchUrlHttps = url.replace('webrtc://', 'https://');
-            res = await fetch(fetchUrlHttps, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription.toJSON() }) });
-        } catch (httpsErr) {
-            const fetchUrlHttp = url.replace('webrtc://', 'http://');
-            res = await fetch(fetchUrlHttp, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription.toJSON() }) });
-        }
-        
-        if (res && res.ok) {
-            const answer = await res.json();
-            await pc.setRemoteDescription(answer.sdp);
-        } else {
-            throw new Error(`Server responded with ${res ? res.status : 'Network Error'}`);
-        }
-      } catch (err) {
-        console.error("Receiver WebRTC Error:", err);
-        setErrorMsg(err.message);
-        if (isActive) reconnectTimeout = setTimeout(connectWebRTC, 3000);
-      }
-    };
-    
-    if (url && url.startsWith('webrtc://')) {
-        connectWebRTC();
-    } else if (url && (url.startsWith('http') || url.startsWith('rtsp'))) {
-        if (videoRef.current) {
-            videoRef.current.src = url;
-            videoRef.current.play().catch(()=>{});
-        }
-    }
-
-    return () => { 
-      isActive = false;
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (rtcConnectionRef.current) { rtcConnectionRef.current.close(); rtcConnectionRef.current = null; }
-    };
-  }, [url]);
-
-  return (
-    <div className="w-screen h-screen bg-black overflow-hidden relative cursor-none flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline muted crossOrigin="anonymous" className="absolute inset-0 w-full h-full object-contain" />
-      
-      {!isConnected && url.startsWith('webrtc://') && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 text-gray-400">
-           <Wifi className="w-16 h-16 mb-4 animate-pulse opacity-50" />
-           <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Connecting to Stream...</h2>
-           <p className="font-mono text-sm">{url}</p>
-           {errorMsg && <p className="text-red-500 mt-4 text-xs font-mono">{errorMsg}</p>}
-        </div>
-      )}
-
-      <div className="absolute top-4 left-4 z-50 bg-black/50 text-white/30 px-2 py-1 rounded text-[10px] font-mono opacity-0 hover:opacity-100 transition-opacity">
-        Dedicated Receiver Mode — Press Ctrl+Shift+R to Exit
-      </div>
-    </div>
-  );
-});
+}
 
 // ============================================================================
 // MAIN APP COMPONENT
@@ -1680,13 +1443,6 @@ export default function App() {
   const [needsInit, setNeedsInit] = useState(window.location.hash.startsWith('#projector'));
   const [workspaceName, setWorkspaceName] = useState('Untitled Workspace');
   const [isProjectorReady, setIsProjectorReady] = useState(false);
-  const [isReceiver, setIsReceiver] = useState(window.location.hash.startsWith('#receiver'));
-  const [receiverUrl, setReceiverUrl] = useState(() => {
-    if (window.location.hash.startsWith('#receiver-')) {
-       return decodeURIComponent(window.location.hash.replace('#receiver-', ''));
-    }
-    return '';
-  });
   
   const advanceTimers = useRef({}); 
   const fadeIntervals = useRef({});
@@ -1699,21 +1455,14 @@ export default function App() {
   const stageRef = useRef(null);
   const cuesRef = useRef([]);
   const masterCanvasRef = useRef(null); 
-  const webrtcCanvasRef = useRef(null);
+  const virtualMediaRecorderRef = useRef(null);
   const oscValuesRef = useRef({}); 
-  const hostPeerConnectionsRef = useRef({}); // Tracks active WebRTC instances
 
   const [projectorActive, setProjectorActive] = useState(false);
   const projectorWinRef = useRef(null);
 
   useEffect(() => {
-    const handleHash = () => { 
-      setIsProjector(window.location.hash.startsWith('#projector')); 
-      setDisplayId(window.location.hash.split('-')[1] || 'all'); 
-      setNeedsInit(window.location.hash.startsWith('#projector')); 
-      setIsReceiver(window.location.hash.startsWith('#receiver'));
-      if (window.location.hash.startsWith('#receiver-')) { setReceiverUrl(decodeURIComponent(window.location.hash.replace('#receiver-', ''))); }
-    };
+    const handleHash = () => { setIsProjector(window.location.hash.startsWith('#projector')); setDisplayId(window.location.hash.split('-')[1] || 'all'); setNeedsInit(window.location.hash.startsWith('#projector')); };
     window.addEventListener('hashchange', handleHash); return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
@@ -1748,23 +1497,6 @@ export default function App() {
   const [selectedDisplays, setSelectedDisplays] = useState(() => { try { const saved = localStorage.getItem('tuxshow_displays'); return saved ? JSON.parse(saved) : []; } catch(e) { return []; } });
   const [ioConfig, setIoConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_io_config'); return saved ? JSON.parse(saved) : { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } catch(e) { return { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } });
   const [virtualDisplayConfig, setVirtualDisplayConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_virtual_display'); return saved ? JSON.parse(saved) : { enabled: false, port: 8554, path: '/display1' }; } catch(e) { return { enabled: false, port: 8554, path: '/display1' }; } });
-  const [receiverConfig, setReceiverConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_receiver_config'); return saved ? JSON.parse(saved) : { enabled: false, url: '', displayId: 'primary' }; } catch(e) { return { enabled: false, url: '', displayId: 'primary' }; } });
-
-  const [urlHistory, setUrlHistory] = useState(() => {
-    try { const saved = localStorage.getItem('tuxshow_url_history'); return saved ? JSON.parse(saved) : []; } catch(e) { return []; }
-  });
-
-  const handleUrlBlur = useCallback((val) => {
-    if (val && (val.startsWith('webrtc://') || val.startsWith('http') || val.startsWith('rtsp://'))) {
-      if (!urlHistory.includes(val)) {
-        const newHistory = [val, ...urlHistory].slice(0, 10);
-        setUrlHistory(newHistory);
-        localStorage.setItem('tuxshow_url_history', JSON.stringify(newHistory));
-      }
-    }
-  }, [urlHistory]);
-
-  useEffect(() => { localStorage.setItem('tuxshow_receiver_config', JSON.stringify(receiverConfig)); }, [receiverConfig]);
 
   const [gridSize, setGridSize] = useState({ x: 1, y: 1 });
   const [pins, setPins] = useState([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }]);
@@ -1804,15 +1536,6 @@ export default function App() {
 
   const evaluateCue = useCallback((cueId, currentCues, depth = 0) => {
     if (depth > 10) return []; const cue = currentCues.find(c => c.id === cueId); if (!cue) return [];
-
-    if ((cue.type === 'audio' || cue.type === 'image') && cue.groupId && cue.state === 'playing') {
-        const siblings = currentCues.filter(c => c.groupId === cue.groupId);
-        const myIndex = siblings.findIndex(c => c.id === cue.id);
-        const nextNonPlaying = siblings.slice(myIndex + 1).find(c => c.state !== 'playing');
-        if (nextNonPlaying) return evaluateCue(nextNonPlaying.id, currentCues, depth + 1);
-        return [];
-    }
-
     if (cue.type === 'goto') {
         if (cue.gotoMode === 'random') {
              const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
@@ -1869,7 +1592,7 @@ export default function App() {
   }, [selectedCueIds, scrollCueIntoView, evaluateCue]);
 
   const handleStopAll = useCallback(() => { setCues(prev => prev.map(cue => ({ ...cue, state: 'stopped' }))); setIsPaused(false); }, []);
-  const stopCue = useCallback((id) => { setCues(prev => prev.map(cue => cue.id === id ? { ...cue, state: cue.state === 'playing' && cue.fadeOutTime > 0 ? 'stopping' : 'stopped' } : cue)); }, []);
+  const stopCue = (id) => { setCues(prev => prev.map(cue => cue.id === id ? { ...cue, state: cue.state === 'playing' && cue.fadeOutTime > 0 ? 'stopping' : 'stopped' } : cue)); };
 
   useEffect(() => {
     if (isProjector) {
@@ -1895,14 +1618,7 @@ export default function App() {
     if (!isProjector) {
       try { const { ipcRenderer } = window.require('electron'); ipcRenderer.invoke('get-gpu-status').then(status => setGpuStatus(typeof status === 'string' ? status : (status ? "Hardware Enabled" : "Probing..."))).catch(() => setGpuStatus("Hardware Unknown")); ipcRenderer.on('projector-closed', () => setProjectorActive(false)); } catch (e) { setGpuStatus("Browser Mode"); }
       try { const os = window.require('os'); const nets = os.networkInterfaces(); for (const name of Object.keys(nets)) { for (const net of nets[name]) { if (net.family === 'IPv4' && !net.internal) { setLocalIp(net.address); return; } } } } catch (e) {}
-        if (navigator.mediaDevices) {
-          navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
-            s.getTracks().forEach(t => t.stop());
-            navigator.mediaDevices.enumerateDevices().then(devices => setVideoDevices(devices.filter(d => d.kind === 'videoinput'))).catch(()=>{});
-          }).catch(() => {
-            navigator.mediaDevices.enumerateDevices().then(devices => setVideoDevices(devices.filter(d => d.kind === 'videoinput'))).catch(()=>{});
-          });
-        }
+      if (navigator.mediaDevices) navigator.mediaDevices.enumerateDevices().then(devices => setVideoDevices(devices.filter(d => d.kind === 'videoinput'))).catch(()=>{});
     }
   }, [isProjector]);
 
@@ -1913,87 +1629,18 @@ export default function App() {
 
   useEffect(() => {
     if (isProjector || !virtualDisplayConfig.enabled) return;
-
-    try {
-      const { ipcRenderer } = window.require('electron');
-      ipcRenderer.send('start-virtual-display', { port: virtualDisplayConfig.port, path: virtualDisplayConfig.path });
-    } catch (e) {}
-
-    return () => { 
-      try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('stop-virtual-display'); } catch(e) {} 
+    const startStream = () => {
+      const canvas = masterCanvasRef.current; if (!canvas) { setTimeout(startStream, 500); return; }
+      try {
+        const stream = canvas.captureStream(30); const recorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp8' }); const { ipcRenderer } = window.require('electron');
+        ipcRenderer.send('start-virtual-display', { port: virtualDisplayConfig.port, path: virtualDisplayConfig.path });
+        recorder.ondataavailable = async (e) => { if (e.data && e.data.size > 0) { const buffer = await e.data.arrayBuffer(); ipcRenderer.send('virtual-display-frame', buffer); } };
+        recorder.start(100); virtualMediaRecorderRef.current = recorder;
+      } catch (err) { }
     };
+    const timerId = setTimeout(startStream, 1000);
+    return () => { clearTimeout(timerId); if (virtualMediaRecorderRef.current && virtualMediaRecorderRef.current.state !== 'inactive') { virtualMediaRecorderRef.current.stop(); virtualMediaRecorderRef.current = null; } try { window.require('electron').ipcRenderer.send('stop-virtual-display'); } catch(e) {} };
   }, [virtualDisplayConfig.enabled, virtualDisplayConfig.port, virtualDisplayConfig.path, isProjector]);
-
-  useEffect(() => {
-    const handleWebRTCOffer = async (event, { offerId, sdp }) => {
-      if (!webrtcCanvasRef.current) webrtcCanvasRef.current = document.createElement('canvas');
-      const canvas = webrtcCanvasRef.current;
-      if (!canvas) return;
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      hostPeerConnectionsRef.current[offerId] = pc;
-
-      const stream = canvas.captureStream(30);
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.oniceconnectionstatechange = () => {
-          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-              delete hostPeerConnectionsRef.current[offerId]; pc.close();
-          }
-      };
-
-      await pc.setRemoteDescription(sdp);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      await new Promise(resolve => {
-          if (pc.iceGatheringState === 'complete') resolve();
-          else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-      });
-
-      const { ipcRenderer } = window.require('electron');
-      ipcRenderer.send('webrtc-answer', { offerId, sdp: pc.localDescription.toJSON() });
-    };
-
-    const handleMobileCamOffer = async (event, { offerId, sdp }) => {
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      hostPeerConnectionsRef.current[offerId] = pc;
-
-      pc.ontrack = (e) => {
-          window.__mobileCamStream = e.streams[0];
-          window.dispatchEvent(new Event('mobile-cam-ready'));
-      };
-
-      pc.oniceconnectionstatechange = () => {
-          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-              delete hostPeerConnectionsRef.current[offerId]; pc.close();
-              window.__mobileCamStream = null;
-          }
-      };
-
-      await pc.setRemoteDescription(sdp);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      await new Promise(resolve => {
-          if (pc.iceGatheringState === 'complete') resolve();
-          else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-      });
-
-      const { ipcRenderer } = window.require('electron');
-      ipcRenderer.send('webrtc-answer', { offerId, sdp: pc.localDescription.toJSON() });
-    };
-
-    try { 
-      const { ipcRenderer } = window.require('electron'); 
-      ipcRenderer.on('webrtc-offer', handleWebRTCOffer); 
-      ipcRenderer.on('mobile-cam-offer', handleMobileCamOffer); 
-      return () => { 
-        ipcRenderer.removeListener('webrtc-offer', handleWebRTCOffer); 
-        ipcRenderer.removeListener('mobile-cam-offer', handleMobileCamOffer); 
-        Object.values(hostPeerConnectionsRef.current).forEach(pc => pc.close()); 
-      }; 
-    } catch (e) {}
-  }, []);
 
   useEffect(() => {
     if (isProjector) { const handleResize = () => setStageSize({ w: window.innerWidth, h: window.innerHeight }); handleResize(); window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize); } 
@@ -2127,9 +1774,7 @@ export default function App() {
           fadeStateTrackers.current[trackKey] = { state: 'playing', start: performance.now(), duration: cue.type === 'transition' ? (cue.duration || 0) : (cue.fadeInTime || 0), triggerTime: cue.triggerTime };
           if (cue.type === 'transition') {
               const mCanvas = masterCanvasRef.current;
-              const wCanvas = webrtcCanvasRef.current;
               if (mCanvas) { const snapCanvas = document.createElement('canvas'); snapCanvas.width = mCanvas.width || 1920; snapCanvas.height = mCanvas.height || 1080; snapCanvas.getContext('2d', { alpha: false }).drawImage(mCanvas, 0, 0); fadeStateTrackers.current[trackKey].snapshot = snapCanvas; }
-              if (wCanvas) { const snapCanvasW = document.createElement('canvas'); snapCanvasW.width = wCanvas.width || 1920; snapCanvasW.height = wCanvas.height || 1080; snapCanvasW.getContext('2d', { alpha: false }).drawImage(wCanvas, 0, 0); fadeStateTrackers.current[trackKey].snapshotWebRTC = snapCanvasW; }
               setTimeout(() => {
                   setCues(prev => {
                       let nextState = prev.map(c => { if (c.id !== cue.id && ['video', 'audio', 'image', 'text', 'camera', 'timer'].includes(c.type) && (c.state === 'playing' || c.state === 'stopping')) { return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' }; } return c; });
@@ -2173,91 +1818,37 @@ export default function App() {
   }, [cues, doVolumeFade, scrollCueIntoView, evaluateCue]);
 
   useEffect(() => {
-    if (!isProjector && !isReceiver && receiverConfig.enabled) {
-      try {
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.send('spawn-receiver', { displayId: receiverConfig.displayId, url: receiverConfig.url });
-      } catch(e) {}
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'r') {
-        try {
-          const { ipcRenderer } = window.require('electron');
-          ipcRenderer.send('exit-receiver');
-        } catch(err){}
-        
-        if (isReceiver) {
-           window.location.hash = '';
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isReceiver]);
-
-  useEffect(() => {
-    if (!isProjector && !isReceiver) {
-      try {
-        const { ipcRenderer } = window.require('electron');
-        const onReceiverExited = () => {
-           setReceiverConfig(prev => ({...prev, enabled: false}));
-        };
-        ipcRenderer.on('receiver-mode-exited', onReceiverExited);
-        return () => ipcRenderer.removeListener('receiver-mode-exited', onReceiverExited);
-      } catch(e) {}
-    }
-  }, [isProjector, isReceiver]);
-
-  useEffect(() => {
     if (!masterCanvasRef.current) masterCanvasRef.current = document.createElement('canvas');
-    if (!webrtcCanvasRef.current) webrtcCanvasRef.current = document.createElement('canvas');
-    const masterCanvas = masterCanvasRef.current; 
-    const webrtcCanvas = webrtcCanvasRef.current;
-    const layerCanvas = document.createElement('canvas'); let animId;
+    const masterCanvas = masterCanvasRef.current; const layerCanvas = document.createElement('canvas'); let animId;
     const renderLoop = () => {
       if (stageSize.w === 0 || stageSize.h === 0) { animId = requestAnimationFrame(renderLoop); return; }
       if (masterCanvas.width !== stageSize.w) masterCanvas.width = Math.max(1, stageSize.w); if (masterCanvas.height !== stageSize.h) masterCanvas.height = Math.max(1, stageSize.h);
-      if (webrtcCanvas.width !== stageSize.w) webrtcCanvas.width = Math.max(1, stageSize.w); if (webrtcCanvas.height !== stageSize.h) webrtcCanvas.height = Math.max(1, stageSize.h);
       if (layerCanvas.width !== stageSize.w) layerCanvas.width = Math.max(1, stageSize.w); if (layerCanvas.height !== stageSize.h) layerCanvas.height = Math.max(1, stageSize.h);
 
       const masterCtx = masterCanvas.getContext('2d', { alpha: false, desynchronized: true }); const layerCtx = layerCanvas.getContext('2d', { alpha: true });
       masterCtx.fillStyle = '#000000'; masterCtx.fillRect(0, 0, stageSize.w, stageSize.h);
-
-      const webrtcCtx = webrtcCanvas.getContext('2d', { alpha: false, desynchronized: true });
-      webrtcCtx.fillStyle = '#000000'; webrtcCtx.fillRect(0, 0, stageSize.w, stageSize.h);
-      
       const currentCues = cuesRef.current.filter(c => c.state === 'playing' || c.state === 'stopping');
       
       currentCues.forEach(cue => {
         if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'stop', 'conditional'].includes(cue.type)) return;
-        
-        const showOnMaster = !isProjector || (displayId === 'all') || (cue.targetDisplay === 'all' || String(cue.targetDisplay) === String(displayId));
-        const showOnWebRTC = !isProjector && (cue.targetDisplay === 'all' || cue.targetDisplay === 'webrtc');
-        if (!showOnMaster && !showOnWebRTC) return;
-
+        if (isProjector && displayId !== 'all' && cue.targetDisplay && cue.targetDisplay !== 'all' && String(cue.targetDisplay) !== String(displayId)) return;
         let opacity = 1; const tracker = fadeStateTrackers.current[cue.id];
         if (tracker) { const elapsed = (performance.now() - tracker.start) / 1000; if (tracker.state === 'playing') opacity = tracker.duration > 0 ? Math.min(1, elapsed / tracker.duration) : 1; else if (tracker.state === 'stopping') opacity = tracker.duration > 0 ? Math.max(0, 1 - (elapsed / tracker.duration)) : 0; }
-        if (cue.type === 'blackout') { 
-            if (showOnMaster) { masterCtx.globalAlpha = opacity; masterCtx.fillStyle = 'black'; masterCtx.fillRect(0, 0, stageSize.w, stageSize.h); masterCtx.globalAlpha = 1; }
-            if (showOnWebRTC) { webrtcCtx.globalAlpha = opacity; webrtcCtx.fillStyle = 'black'; webrtcCtx.fillRect(0, 0, stageSize.w, stageSize.h); webrtcCtx.globalAlpha = 1; }
-            return; 
-        }
+        if (cue.type === 'blackout') { masterCtx.globalAlpha = opacity; masterCtx.fillStyle = 'black'; masterCtx.fillRect(0, 0, stageSize.w, stageSize.h); masterCtx.globalAlpha = 1; return; }
 
         let mediaEl = document.getElementById(`master-${cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : (cue.type === 'timer' ? 'timer' : (cue.type === 'camera' ? 'cam' : 'vid')))}-${cue.id}`);
         if (cue.chromaKeyEnabled) { const chromaEl = document.getElementById(`master-chroma-${cue.id}`); if (chromaEl) mediaEl = chromaEl; }
         if (!mediaEl) return; if (mediaEl instanceof HTMLVideoElement && mediaEl.readyState < 2) return; if (mediaEl instanceof HTMLImageElement && !mediaEl.complete) return;
         
         const cueOpac = cue.customOpacity !== undefined ? cue.customOpacity : 1; 
-        if (showOnMaster) masterCtx.globalAlpha = opacity * cueOpac;
-        if (showOnWebRTC) webrtcCtx.globalAlpha = opacity * cueOpac;
+        masterCtx.globalAlpha = opacity * cueOpac;
 
         // Apply HSB Color Correction
-        const filterStr = (cue.colorFilterEnabled && ['video', 'image', 'camera'].includes(cue.type)) ? `hue-rotate(${cue.hue || 0}deg) saturate(${cue.saturation ?? 100}%) brightness(${cue.brightness ?? 100}%)` : 'none';
-        if (showOnMaster) masterCtx.filter = filterStr;
-        if (showOnWebRTC) webrtcCtx.filter = filterStr;
+        if (cue.colorFilterEnabled && ['video', 'image', 'camera'].includes(cue.type)) {
+            masterCtx.filter = `hue-rotate(${cue.hue || 0}deg) saturate(${cue.saturation ?? 100}%) brightness(${cue.brightness ?? 100}%)`;
+        } else {
+            masterCtx.filter = 'none';
+        }
 
         // GEOMETRY & CROP LOGIC
         const srcW = mediaEl.videoWidth || mediaEl.naturalWidth || mediaEl.width || stageSize.w;
@@ -2288,50 +1879,45 @@ export default function App() {
         const dx = (stageSize.w * pX) - (dw / 2); 
         const dy = (stageSize.h * pY) - (dh / 2);
 
-        const drawToCtx = (ctx, imageToDraw) => {
+        const drawToMaster = (imageToDraw) => {
             if (cue.warpEnabled && cue.warpPins) {
                 const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
-                ctx.save();
-                ctx.beginPath();
-                ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[3].x, pts[3].y);
-                ctx.closePath(); ctx.clip();
-                applyCanvasAffine(ctx, dw, dh, pts[0], pts[1], pts[3], 1);
-                ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
-                ctx.restore();
+                masterCtx.save();
+                masterCtx.beginPath();
+                masterCtx.moveTo(pts[0].x, pts[0].y); masterCtx.lineTo(pts[1].x, pts[1].y); masterCtx.lineTo(pts[3].x, pts[3].y);
+                masterCtx.closePath(); masterCtx.clip();
+                applyCanvasAffine(masterCtx, dw, dh, pts[0], pts[1], pts[3], 1);
+                masterCtx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
+                masterCtx.restore();
 
-                ctx.save();
-                ctx.beginPath();
-                ctx.moveTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y);
-                ctx.closePath(); ctx.clip();
-                applyCanvasAffine(ctx, dw, dh, pts[1], pts[2], pts[3], 2);
-                ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
-                ctx.restore();
+                masterCtx.save();
+                masterCtx.beginPath();
+                masterCtx.moveTo(pts[1].x, pts[1].y); masterCtx.lineTo(pts[2].x, pts[2].y); masterCtx.lineTo(pts[3].x, pts[3].y);
+                masterCtx.closePath(); masterCtx.clip();
+                applyCanvasAffine(masterCtx, dw, dh, pts[1], pts[2], pts[3], 2);
+                masterCtx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
+                masterCtx.restore();
             } else {
-                ctx.drawImage(imageToDraw, sx, sy, sw, sh, dx, dy, dw, dh);
+                masterCtx.drawImage(imageToDraw, sx, sy, sw, sh, dx, dy, dw, dh);
             }
             
-            ctx.filter = 'none'; // Ensure outline isn't color filtered
+            masterCtx.filter = 'none'; // Ensure outline isn't color filtered
 
             if (cue.outlineEnabled) {
-                ctx.save();
+                masterCtx.save();
                 if (cue.warpEnabled && cue.warpPins) {
                      const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
-                     ctx.beginPath();
-                     ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); ctx.closePath();
+                     masterCtx.beginPath();
+                     masterCtx.moveTo(pts[0].x, pts[0].y); masterCtx.lineTo(pts[1].x, pts[1].y); masterCtx.lineTo(pts[2].x, pts[2].y); masterCtx.lineTo(pts[3].x, pts[3].y); masterCtx.closePath();
                 } else {
-                     ctx.beginPath();
-                     ctx.rect(dx, dy, dw, dh);
+                     masterCtx.beginPath();
+                     masterCtx.rect(dx, dy, dw, dh);
                 }
-                ctx.strokeStyle = cue.outlineColor || '#ffffff';
-                ctx.lineWidth = cue.outlineWidth || 2;
-                ctx.stroke();
-                ctx.restore();
+                masterCtx.strokeStyle = cue.outlineColor || '#ffffff';
+                masterCtx.lineWidth = cue.outlineWidth || 2;
+                masterCtx.stroke();
+                masterCtx.restore();
             }
-        };
-
-        const drawWrapper = (imageToDraw) => {
-             if (showOnMaster) drawToCtx(masterCtx, imageToDraw);
-             if (showOnWebRTC) drawToCtx(webrtcCtx, imageToDraw);
         };
 
         try {
@@ -2340,48 +1926,35 @@ export default function App() {
                if (maskEl && maskEl.complete) { 
                    const tempCanvas = document.createElement('canvas'); tempCanvas.width = sw; tempCanvas.height = sh; const tCtx = tempCanvas.getContext('2d');
                    tCtx.drawImage(maskEl, sx, sy, sw, sh, 0, 0, sw, sh); tCtx.globalCompositeOperation = 'source-in'; tCtx.drawImage(mediaEl, sx, sy, sw, sh, 0, 0, sw, sh);
-                   drawWrapper(tempCanvas);
-               } else drawWrapper(mediaEl);
-            } else drawWrapper(mediaEl);
+                   drawToMaster(tempCanvas);
+               } else drawToMaster(mediaEl);
+            } else drawToMaster(mediaEl);
         } catch(err) { }
-        if (showOnMaster) { masterCtx.globalAlpha = 1; masterCtx.filter = 'none'; }
-        if (showOnWebRTC) { webrtcCtx.globalAlpha = 1; webrtcCtx.filter = 'none'; }
+        masterCtx.globalAlpha = 1;
+        masterCtx.filter = 'none'; // Cleanup for next cue
       });
 
-      const drawTransitionShapes = (ctx, W, H, p, maxR, tType) => {
-          switch(tType) {
-              case 'wipe-up': ctx.fillRect(0, H - H*p, W, H*p); break;
-              case 'wipe-down': ctx.fillRect(0, 0, W, H*p); break;
-              case 'iris-in': ctx.arc(W/2, H/2, maxR*p, 0, Math.PI*2); ctx.fill(); break;
-              case 'iris-out': ctx.globalCompositeOperation = 'destination-in'; ctx.arc(W/2, H/2, maxR*(1-p), 0, Math.PI*2); ctx.fill(); break;
-              case 'star-in': case 'star-out': const spikes = 5; const drawS = (outer, inner) => { let rot = Math.PI / 2 * 3; let cx = W/2, cy = H/2; let step = Math.PI / spikes; ctx.moveTo(cx, cy - outer); for(let i=0;i<spikes;i++){ ctx.lineTo(cx + Math.cos(rot)*outer, cy + Math.sin(rot)*outer); rot+=step; ctx.lineTo(cx + Math.cos(rot)*inner, cy + Math.sin(rot)*inner); rot+=step; } ctx.lineTo(cx, cy - outer); ctx.closePath(); }; if(tType==='star-in') { drawS(maxR*p, maxR*p*0.4); ctx.fill(); } else { ctx.globalCompositeOperation = 'destination-in'; drawS(maxR*(1-p), maxR*(1-p)*0.4); ctx.fill(); } break;
-              case 'curtain-in': ctx.fillRect(0, H/2 - (H/2)*p, W, H*p); break;
-              case 'curtain-out': ctx.globalCompositeOperation = 'destination-in'; ctx.fillRect(0, H/2 - (H/2)*(1-p), W, H*(1-p)); break;
-              case 'ripple-in': ctx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*p*1.5) - (i*maxR/4); if(r>0){ ctx.moveTo(W/2+r, H/2); ctx.arc(W/2,H/2,r,0,Math.PI*2); } } ctx.stroke(); break;
-              case 'ripple-out': ctx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*(1-p)*1.5) + (i*maxR/4); if(r<maxR*1.5){ ctx.moveTo(W/2+r, H/2); ctx.arc(W/2,H/2,r,0,Math.PI*2); } } ctx.stroke(); break;
-              case 'wind-left': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); ctx.fillRect(W - W*lp, y, W*lp, H/40 + 1); } break;
-              case 'wind-right': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); ctx.fillRect(0, y, W*lp, H/40 + 1); } break;
-          }
-      };
-
       currentCues.forEach(cue => {
-        if (cue.type === 'transition' && (fadeStateTrackers.current[cue.id]?.snapshot || fadeStateTrackers.current[cue.id]?.snapshotWebRTC)) {
+        if (cue.type === 'transition' && fadeStateTrackers.current[cue.id]?.snapshot) {
             const tracker = fadeStateTrackers.current[cue.id]; let p = 0; if (tracker.duration > 0) { p = Math.min(1, Math.max(0, (performance.now() - tracker.start) / (tracker.duration * 1000))); } else p = 1;
             if (p < 1) {
-                const W = stageSize.w; const H = stageSize.h;
+                const snap = tracker.snapshot; const W = stageSize.w; const H = stageSize.h;
+                layerCtx.clearRect(0,0,W,H); layerCtx.globalCompositeOperation = 'source-over'; layerCtx.drawImage(snap, 0, 0, W, H); layerCtx.globalCompositeOperation = 'destination-out'; layerCtx.fillStyle = 'white'; layerCtx.beginPath();
                 const maxR = Math.hypot(W, H) / 2; const tType = cue.transitionType || 'wipe-up';
-
-                if (tracker.snapshot) {
-                    layerCtx.clearRect(0,0,W,H); layerCtx.globalCompositeOperation = 'source-over'; layerCtx.drawImage(tracker.snapshot, 0, 0, W, H); layerCtx.globalCompositeOperation = 'destination-out'; layerCtx.fillStyle = 'white'; layerCtx.beginPath();
-                    drawTransitionShapes(layerCtx, W, H, p, maxR, tType);
-                    masterCtx.globalAlpha = 1; masterCtx.globalCompositeOperation = 'source-over'; masterCtx.drawImage(layerCanvas, 0, 0);
+                switch(tType) {
+                    case 'wipe-up': layerCtx.fillRect(0, H - H*p, W, H*p); break;
+                    case 'wipe-down': layerCtx.fillRect(0, 0, W, H*p); break;
+                    case 'iris-in': layerCtx.arc(W/2, H/2, maxR*p, 0, Math.PI*2); layerCtx.fill(); break;
+                    case 'iris-out': layerCtx.globalCompositeOperation = 'destination-in'; layerCtx.arc(W/2, H/2, maxR*(1-p), 0, Math.PI*2); layerCtx.fill(); break;
+                    case 'star-in': case 'star-out': const spikes = 5; const drawS = (outer, inner) => { let rot = Math.PI / 2 * 3; let cx = W/2, cy = H/2; let step = Math.PI / spikes; layerCtx.moveTo(cx, cy - outer); for(let i=0;i<spikes;i++){ layerCtx.lineTo(cx + Math.cos(rot)*outer, cy + Math.sin(rot)*outer); rot+=step; layerCtx.lineTo(cx + Math.cos(rot)*inner, cy + Math.sin(rot)*inner); rot+=step; } layerCtx.lineTo(cx, cy - outer); layerCtx.closePath(); }; if(tType==='star-in') { drawS(maxR*p, maxR*p*0.4); layerCtx.fill(); } else { layerCtx.globalCompositeOperation = 'destination-in'; drawS(maxR*(1-p), maxR*(1-p)*0.4); layerCtx.fill(); } break;
+                    case 'curtain-in': layerCtx.fillRect(0, H/2 - (H/2)*p, W, H*p); break;
+                    case 'curtain-out': layerCtx.globalCompositeOperation = 'destination-in'; layerCtx.fillRect(0, H/2 - (H/2)*(1-p), W, H*(1-p)); break;
+                    case 'ripple-in': layerCtx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*p*1.5) - (i*maxR/4); if(r>0){ layerCtx.moveTo(W/2+r, H/2); layerCtx.arc(W/2,H/2,r,0,Math.PI*2); } } layerCtx.stroke(); break;
+                    case 'ripple-out': layerCtx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*(1-p)*1.5) + (i*maxR/4); if(r<maxR*1.5){ layerCtx.moveTo(W/2+r, H/2); layerCtx.arc(W/2,H/2,r,0,Math.PI*2); } } layerCtx.stroke(); break;
+                    case 'wind-left': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); layerCtx.fillRect(W - W*lp, y, W*lp, H/40 + 1); } break;
+                    case 'wind-right': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); layerCtx.fillRect(0, y, W*lp, H/40 + 1); } break;
                 }
-                
-                if (tracker.snapshotWebRTC && !isProjector) {
-                    layerCtx.clearRect(0,0,W,H); layerCtx.globalCompositeOperation = 'source-over'; layerCtx.drawImage(tracker.snapshotWebRTC, 0, 0, W, H); layerCtx.globalCompositeOperation = 'destination-out'; layerCtx.fillStyle = 'white'; layerCtx.beginPath();
-                    drawTransitionShapes(layerCtx, W, H, p, maxR, tType);
-                    webrtcCtx.globalAlpha = 1; webrtcCtx.globalCompositeOperation = 'source-over'; webrtcCtx.drawImage(layerCanvas, 0, 0);
-                }
+                masterCtx.globalAlpha = 1; masterCtx.globalCompositeOperation = 'source-over'; masterCtx.drawImage(layerCanvas, 0, 0);
             }
         }
       });
@@ -2410,9 +1983,9 @@ export default function App() {
   // =========================================================================
   // FILE SAVE, LOAD & PACK WORKSPACE
   // =========================================================================
-  const handleSaveShow = useCallback(() => { const stateToSave = { cues: cuesRef.current.map(c => ({ ...c, state: 'stopped' })), pins, gridSize, isPaused: false }; const blob = new Blob([JSON.stringify(stateToSave, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'show_workspace.TSW'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); setWorkspaceName('show_workspace.TSW'); }, [pins, gridSize]);
+  const handleSaveShow = () => { const stateToSave = { cues: cues.map(c => ({ ...c, state: 'stopped' })), pins, gridSize, isPaused: false }; const blob = new Blob([JSON.stringify(stateToSave, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'show_workspace.TSW'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); setWorkspaceName('show_workspace.TSW'); };
   
-  const applyLoadedState = useCallback((loadedState) => {
+  const applyLoadedState = (loadedState) => {
     let hydratedCues = loadedState.cues.map(c => {
       let migrated = { ...c };
       if (c.fadeTime !== undefined || c.autoAdvance !== undefined || c.endBehavior !== undefined) {
@@ -2423,7 +1996,7 @@ export default function App() {
           delete migrated.fadeTime; delete migrated.autoAdvance; delete migrated.advanceTime; delete migrated.endBehavior;
       }
       return {
-        ...migrated, description: migrated.description || '', groupId: migrated.groupId ?? null, groupMode: migrated.groupMode || 'fire-all', isExpanded: migrated.isExpanded ?? true, cameraLive: migrated.cameraLive ?? true, maskEnabled: migrated.maskEnabled ?? false, maskDataUrl: migrated.maskDataUrl ?? null, chromaKeyEnabled: migrated.chromaKeyEnabled ?? false, chromaKeyColor: migrated.chromaKeyColor || '#00ff00', chromaKeySimilarity: migrated.chromaKeySimilarity ?? 0.4, chromaKeySmoothness: migrated.chromaKeySmoothness ?? 0.1, counterLimit: migrated.counterLimit ?? 1, counterCurrent: migrated.counterCurrent ?? 0, gotoMode: migrated.gotoMode || 'specific', targetCueRangeMin: migrated.targetCueRangeMin || '', targetCueRangeMax: migrated.targetCueRangeMax || '', scheduleDate: migrated.scheduleDate || '', scheduleTime: migrated.scheduleTime || '', textContent: migrated.textContent || '', textColor: migrated.textColor || '#ffffff', textScale: migrated.textScale || 100, fontFamily: migrated.fontFamily || 'sans-serif', fontWeight: migrated.fontWeight || 'bold', fontStyle: migrated.fontStyle || 'normal', textAlign: migrated.textAlign || 'center', textX: migrated.textX ?? 50, textY: migrated.textY ?? 50, textShadowEnabled: migrated.textShadowEnabled ?? false, textShadowColor: migrated.textShadowColor || '#000000', textShadowBlur: migrated.textShadowBlur ?? 10, textShadowOffsetX: migrated.textShadowOffsetX ?? 5, textShadowOffsetY: migrated.textShadowOffsetY ?? 5, textSmoothing: migrated.textSmoothing ?? true, mscDevice: migrated.mscDevice ?? 0, mscCommand: migrated.mscCommand || 'GO', mscCue: migrated.mscCue || '1', oscIp: migrated.oscIp || '127.0.0.1', oscPort: migrated.oscPort ?? 8000, oscAddress: migrated.oscAddress || '/tuxshow/go', oscArgs: migrated.oscArgs || '', targetDisplay: migrated.targetDisplay || 'all', targetCueNumber: migrated.targetCueNumber || '',
+        ...migrated, groupId: migrated.groupId ?? null, groupMode: migrated.groupMode || 'fire-all', isExpanded: migrated.isExpanded ?? true, cameraLive: migrated.cameraLive ?? true, maskEnabled: migrated.maskEnabled ?? false, maskDataUrl: migrated.maskDataUrl ?? null, chromaKeyEnabled: migrated.chromaKeyEnabled ?? false, chromaKeyColor: migrated.chromaKeyColor || '#00ff00', chromaKeySimilarity: migrated.chromaKeySimilarity ?? 0.4, chromaKeySmoothness: migrated.chromaKeySmoothness ?? 0.1, counterLimit: migrated.counterLimit ?? 1, counterCurrent: migrated.counterCurrent ?? 0, gotoMode: migrated.gotoMode || 'specific', targetCueRangeMin: migrated.targetCueRangeMin || '', targetCueRangeMax: migrated.targetCueRangeMax || '', scheduleDate: migrated.scheduleDate || '', scheduleTime: migrated.scheduleTime || '', textContent: migrated.textContent || '', textColor: migrated.textColor || '#ffffff', textScale: migrated.textScale || 100, fontFamily: migrated.fontFamily || 'sans-serif', fontWeight: migrated.fontWeight || 'bold', fontStyle: migrated.fontStyle || 'normal', textAlign: migrated.textAlign || 'center', textX: migrated.textX ?? 50, textY: migrated.textY ?? 50, textShadowEnabled: migrated.textShadowEnabled ?? false, textShadowColor: migrated.textShadowColor || '#000000', textShadowBlur: migrated.textShadowBlur ?? 10, textShadowOffsetX: migrated.textShadowOffsetX ?? 5, textShadowOffsetY: migrated.textShadowOffsetY ?? 5, textSmoothing: migrated.textSmoothing ?? true, mscDevice: migrated.mscDevice ?? 0, mscCommand: migrated.mscCommand || 'GO', mscCue: migrated.mscCue || '1', oscIp: migrated.oscIp || '127.0.0.1', oscPort: migrated.oscPort ?? 8000, oscAddress: migrated.oscAddress || '/tuxshow/go', oscArgs: migrated.oscArgs || '', targetDisplay: migrated.targetDisplay || 'all', targetCueNumber: migrated.targetCueNumber || '',
         scaleX: migrated.scaleX ?? 100, scaleY: migrated.scaleY ?? 100, keepAspect: migrated.keepAspect ?? true, posX: migrated.posX ?? 50, posY: migrated.posY ?? 50, cropTop: migrated.cropTop ?? 0, cropBottom: migrated.cropBottom ?? 0, cropLeft: migrated.cropLeft ?? 0, cropRight: migrated.cropRight ?? 0, outlineEnabled: migrated.outlineEnabled ?? false, outlineColor: migrated.outlineColor || '#ffffff', outlineWidth: migrated.outlineWidth ?? 2, warpEnabled: migrated.warpEnabled ?? false, warpPins: migrated.warpPins || [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],
         mediaSyncOffset: migrated.mediaSyncOffset || 0, colorFilterEnabled: migrated.colorFilterEnabled ?? false, hue: migrated.hue || 0, saturation: migrated.saturation ?? 100, brightness: migrated.brightness ?? 100,
         timerDuration: migrated.timerDuration || 60, timerStyle: migrated.timerStyle || 'countdown', timerFormat: migrated.timerFormat || 'MM:SS', timerVisible: migrated.timerVisible ?? true,
@@ -2435,9 +2008,9 @@ export default function App() {
     if (loadedState.pins) setPins(loadedState.pins); 
     if (loadedState.gridSize) setGridSize(loadedState.gridSize); 
     setIsPaused(false);
-  }, []);
+  };
 
-  const handleLoadShow = useCallback((e) => { 
+  const handleLoadShow = (e) => { 
     const file = e.target.files[0]; if (!file) return; 
     setWorkspaceName(file.name);
     
@@ -2481,9 +2054,9 @@ export default function App() {
       } catch (err) { alert("Invalid .TSW file."); } 
     }; 
     reader.readAsText(file); e.target.value = ''; 
-  }, [applyLoadedState]);
+  };
   
-  const handlePackWorkspace = useCallback(async () => {
+  const handlePackWorkspace = async () => {
     if (!packPath) return;
     setIsPacking(true);
     setPackProgress('Initializing...');
@@ -2555,10 +2128,10 @@ export default function App() {
         setPackProgress(`Error: ${err.message}`);
         setIsPacking(false);
     }
-  }, [packPath, cues, pins, gridSize]);
+  };
 
-  const handleAddFolder = useCallback((e) => { if (!e.target.files) return; const files = Array.from(e.target.files); const validFiles = files.filter(file => { const name = file.name.toLowerCase(); return file.type.startsWith('audio/') || file.type.startsWith('video/') || file.type.startsWith('image/') || name.endsWith('.mp4') || name.endsWith('.webm') || name.endsWith('.ogg') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'); }); validFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })); const newCues = validFiles.map((file, idx) => { let type = 'video'; const name = file.name.toLowerCase(); if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg')) type = 'audio'; else if (file.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg')) type = 'image'; return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, description: '', url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', followAction: 'none', fadeInTime: 1.0, fadeOutTime: 1.0, duration: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }; }); if (newCues.length > 0) { setCues(prev => { const startingNum = prev.length; const updatedNewCues = newCues.map((c, i) => ({ ...c, number: (startingNum + i + 1).toString() })); return [...prev, ...updatedNewCues]; }); } e.target.value = ''; }, []);
-  const toggleProjectorWindow = useCallback(() => { try { const { ipcRenderer } = window.require('electron'); if (projectorActive) { ipcRenderer.send('close-projector'); setProjectorActive(false); } else { ipcRenderer.send('spawn-projector', selectedDisplays); setProjectorActive(true); } } catch (e) { if (window.location.protocol === 'blob:' || window.location.hostname.includes('googleusercontent')) { window.location.hash = 'projector-all'; setIsProjector(true); setDisplayId('all'); setNeedsInit(true); if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{}); } else { if (projectorWinRef.current && !projectorWinRef.current.closed) { projectorWinRef.current.close(); projectorWinRef.current = null; setProjectorActive(false); } else { projectorWinRef.current = window.open(window.location.origin + window.location.pathname + '#projector-all', 'ProjectorOutput', 'width=1280,height=720'); setProjectorActive(true); const checkClose = setInterval(() => { if (projectorWinRef.current && projectorWinRef.current.closed) { setProjectorActive(false); clearInterval(checkClose); } }, 500); } } } }, [projectorActive, selectedDisplays]);
+  const handleAddFolder = (e) => { if (!e.target.files) return; const files = Array.from(e.target.files); const validFiles = files.filter(file => { const name = file.name.toLowerCase(); return file.type.startsWith('audio/') || file.type.startsWith('video/') || file.type.startsWith('image/') || name.endsWith('.mp4') || name.endsWith('.webm') || name.endsWith('.ogg') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'); }); validFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })); const newCues = validFiles.map((file, idx) => { let type = 'video'; const name = file.name.toLowerCase(); if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg')) type = 'audio'; else if (file.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg')) type = 'image'; return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', followAction: 'none', fadeInTime: 1.0, fadeOutTime: 1.0, duration: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }; }); if (newCues.length > 0) { setCues(prev => { const startingNum = prev.length; const updatedNewCues = newCues.map((c, i) => ({ ...c, number: (startingNum + i + 1).toString() })); return [...prev, ...updatedNewCues]; }); } e.target.value = ''; };
+  const toggleProjectorWindow = () => { try { const { ipcRenderer } = window.require('electron'); if (projectorActive) { ipcRenderer.send('close-projector'); setProjectorActive(false); } else { ipcRenderer.send('spawn-projector', selectedDisplays); setProjectorActive(true); } } catch (e) { if (window.location.protocol === 'blob:' || window.location.hostname.includes('googleusercontent')) { window.location.hash = 'projector-all'; setIsProjector(true); setDisplayId('all'); setNeedsInit(true); if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{}); } else { if (projectorWinRef.current && !projectorWinRef.current.closed) { projectorWinRef.current.close(); projectorWinRef.current = null; setProjectorActive(false); } else { projectorWinRef.current = window.open(window.location.origin + window.location.pathname + '#projector-all', 'ProjectorOutput', 'width=1280,height=720'); setProjectorActive(true); const checkClose = setInterval(() => { if (projectorWinRef.current && projectorWinRef.current.closed) { setProjectorActive(false); clearInterval(checkClose); } }, 500); } } } };
 
   // =========================================================================
   // FILE MIGRATOR UI CLOSE & CONFIRM BUTTONS
@@ -2577,7 +2150,7 @@ export default function App() {
   // =========================================================================
   // CORE TIMELINE AND RUNTIME STATE UPDATES
   // =========================================================================
-  const handleCueClick = useCallback((e, id) => {
+  const handleCueClick = (e, id) => {
     if (e.shiftKey && lastSelectedId) {
       const startIdx = cues.findIndex(c => c.id === lastSelectedId);
       const endIdx = cues.findIndex(c => c.id === id);
@@ -2592,7 +2165,7 @@ export default function App() {
       setSelectedCueIds([id]);
       setLastSelectedId(id);
     }
-  }, [cues, lastSelectedId, selectedCueIds]);
+  };
 
   const isVisible = useCallback((cueId) => {
     const cue = cues.find(c => c.id === cueId);
@@ -2608,14 +2181,14 @@ export default function App() {
     return getIndent(cue.groupId, depth + 1);
   }, [cues]);
 
-  const activeMediaCues = useMemo(() => cues.filter(c => c.state === 'playing' || c.state === 'stopping'), [cues]);
-  const activeCues = useMemo(() => cues.filter(c => selectedCueIds.includes(c.id)), [cues, selectedCueIds]);
-  const getSharedVal = useCallback((field, fallback = '') => { if (activeCues.length === 0) return fallback; const val = activeCues[0][field]; return val === undefined || val === null ? fallback : (activeCues.every(c => c[field] === val) ? val : fallback); }, [activeCues]);
-  const isMixed = useCallback((field) => { if (activeCues.length === 0) return false; const val = activeCues[0][field]; return !activeCues.every(c => c[field] === val); }, [activeCues]);
-  const updateSelectedCues = useCallback((field, value) => { setCues(prev => prev.map(c => { if (!selectedCueIds.includes(c.id)) return c; return { ...c, [field]: value }; })); }, [selectedCueIds]);
+  const activeMediaCues = cues.filter(c => c.state === 'playing' || c.state === 'stopping');
+  const activeCues = cues.filter(c => selectedCueIds.includes(c.id));
+  const getSharedVal = (field, fallback = '') => { if (activeCues.length === 0) return fallback; const val = activeCues[0][field]; return val === undefined || val === null ? fallback : (activeCues.every(c => c[field] === val) ? val : fallback); };
+  const isMixed = (field) => { if (activeCues.length === 0) return false; const val = activeCues[0][field]; return !activeCues.every(c => c[field] === val); };
+  const updateSelectedCues = (field, value) => { setCues(prev => prev.map(c => { if (!selectedCueIds.includes(c.id)) return c; return { ...c, [field]: value }; })); };
 
-  const handlePinDrag = useCallback((index, e) => { if (!stageRef.current) return; const rect = stageRef.current.getBoundingClientRect(); const newPins = [...pins]; newPins[index] = { x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) }; setPins(newPins); }, [pins]);
-  const handleResetPins = useCallback(() => { const np = []; for (let iy = 0; iy <= gridSize.y; iy++) { for (let ix = 0; ix <= gridSize.x; ix++) { np.push({ x: ix / gridSize.x, y: iy / gridSize.y }); } } setPins(np); }, [gridSize]);
+  const handlePinDrag = (index, e) => { if (!stageRef.current) return; const rect = stageRef.current.getBoundingClientRect(); const newPins = [...pins]; newPins[index] = { x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) }; setPins(newPins); };
+  const handleResetPins = () => { const np = []; for (let iy = 0; iy <= gridSize.y; iy++) { for (let ix = 0; ix <= gridSize.x; ix++) { np.push({ x: ix / gridSize.x, y: iy / gridSize.y }); } } setPins(np); };
 
   const quadW = Math.max(1, stageSize.w / gridSize.x); const quadH = Math.max(1, stageSize.h / gridSize.y);
 
@@ -2652,7 +2225,7 @@ export default function App() {
               {cue.type === 'text' && <TextMasterPlayer cue={cue} />}
               {cue.type === 'timer' && <TimerMasterPlayer cue={cue} fadeStateTrackers={fadeStateTrackers} />}
               {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted crossOrigin="anonymous" onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline />}
-              {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
+              {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
               {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
               {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
               {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
@@ -2679,17 +2252,10 @@ export default function App() {
   // =========================================================================
   // RENDER: MAIN CONTROL INTERFACE
   // =========================================================================
-  if (isReceiver) {
-    return <DedicatedReceiver url={receiverUrl} />;
-  }
-
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-600 relative">
       <style>{` @keyframes meter { 0% { transform: scaleY(0.2); } 100% { transform: scaleY(1); } } `}</style>
 
-      <datalist id="url-history">
-        {urlHistory.map((h, i) => <option key={i} value={h} />)}
-      </datalist>
       <div className="hidden">
         {cues.map(cue => (
           <Fragment key={`media-group-${cue.id}`}>
@@ -2697,7 +2263,7 @@ export default function App() {
             {cue.type === 'text' && <TextMasterPlayer cue={cue} />}
             {cue.type === 'timer' && <TimerMasterPlayer cue={cue} fadeStateTrackers={fadeStateTrackers} />}
             {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted crossOrigin="anonymous" onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline />}
-            {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
+            {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
             {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
             {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
             {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
@@ -2812,10 +2378,10 @@ export default function App() {
                   )}
                 </div>
 
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Virtual WebRTC Output Stream</h4>
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Virtual HTTP Display</h4>
                 <div className="bg-gray-950 p-3 rounded border border-gray-800">
                   <label className="flex items-center gap-3 text-sm font-bold text-pink-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={virtualDisplayConfig.enabled} onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, enabled: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-pink-500 accent-pink-500 cursor-pointer" /> Enable WebRTC Output Stream
+                    <input type="checkbox" checked={virtualDisplayConfig.enabled} onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, enabled: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-pink-500 accent-pink-500 cursor-pointer" /> Enable Virtual Display
                   </label>
                   <div className="flex items-center gap-4 pl-7 mb-2">
                     <label className="text-xs text-gray-400">Port:</label>
@@ -2837,30 +2403,6 @@ export default function App() {
                       className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-pink-500" 
                       placeholder="/display1" 
                     />
-                  </div>
-                </div>
-
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Dedicated Receiver Mode</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="flex items-center gap-3 text-sm font-bold text-indigo-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={receiverConfig.enabled} onChange={(e) => {
-                       const enabled = e.target.checked;
-                       setReceiverConfig(prev => ({...prev, enabled}));
-                       if (enabled) {
-                           try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('spawn-receiver', { displayId: receiverConfig.displayId, url: receiverConfig.url }); } catch(err) {}
-                       }
-                    }} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-indigo-500 accent-indigo-500 cursor-pointer" /> Enable Dedicated Receiver Mode
-                  </label>
-                  <div className="flex items-center gap-4 pl-7 mb-2">
-                    <label className="text-xs text-gray-400">Stream URL:</label>
-                    <input list="url-history" type="text" value={receiverConfig.url} onChange={(e) => setReceiverConfig(prev => ({...prev, url: e.target.value}))} onBlur={(e) => handleUrlBlur(e.target.value)} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500" placeholder="webrtc://192.168.0.191:8554/display1" />
-                  </div>
-                  <div className="flex items-center gap-4 pl-7">
-                    <label className="text-xs text-gray-400">Display:</label>
-                    <select value={receiverConfig.displayId} onChange={(e) => setReceiverConfig(prev => ({...prev, displayId: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500">
-                      <option value="primary">Primary Display</option>
-                      {hardwareDisplays.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
-                    </select>
                   </div>
                 </div>
               </div>
@@ -2925,7 +2467,7 @@ export default function App() {
             cues={cues} setCues={setCues} selectedCueIds={selectedCueIds} activeCues={activeCues} 
             isMixed={isMixed} getSharedVal={getSharedVal} updateSelectedCues={updateSelectedCues} 
             getNativeFilePath={getNativeFilePath} videoDevices={videoDevices} hardwareDisplays={hardwareDisplays}
-            setEditingMaskCueId={setEditingMaskCueId} setEditingWarpCueId={setEditingWarpCueId} handleUrlBlur={handleUrlBlur}
+            setEditingMaskCueId={setEditingMaskCueId} setEditingWarpCueId={setEditingWarpCueId}
           />
         </div>
       </div>
