@@ -10,13 +10,10 @@ jobs:
   build-and-publish:
     # 2. Spin up a fresh Ubuntu machine in the cloud
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # <--- Add this line to grant upload permissions
-
     # Give the script permission to create a Release page on your repository
     permissions:
-      contents: write 
-
+      contents: write # <--- Add this line to grant upload permissions
+       
     steps:
       # 3. Download your TuxShow code onto the cloud machine
       - name: Checkout Code
