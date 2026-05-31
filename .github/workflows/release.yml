@@ -10,7 +10,9 @@ jobs:
   build-and-publish:
     # 2. Spin up a fresh Ubuntu machine in the cloud
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write # <--- Add this line to grant upload permissions
+
     # Give the script permission to create a Release page on your repository
     permissions:
       contents: write 
@@ -37,6 +39,8 @@ jobs:
       # 6. Run your build script to generate the .deb file in the release/ folder
       - name: Build the .deb Installer
         run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 7. Take that generated .deb file and automatically publish it to the GitHub Releases page
       - name: Publish to GitHub Releases
