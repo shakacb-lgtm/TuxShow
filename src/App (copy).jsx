@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { 
   Play, Square, Video, Music, ChevronRight, ChevronDown, Plus, Trash2, 
   ArrowRight, Layers, StopCircle, GripVertical, Image as ImageIcon, FolderOpen, 
@@ -7,8 +7,9 @@ import {
   Settings, FilePlus, Save, RotateCcw, Grid3X3, Activity, Crosshair, 
   MonitorDown, MonitorUp, Edit3, Crop, Wand2, XSquare, Bold, Italic, Cast, 
   X, Check, Archive, RefreshCw, Maximize, Move, GitBranch, Hourglass, 
-  Palette, SlidersHorizontal
+  Palette, SlidersHorizontal, Ear, QrCode, Smartphone, LayoutGrid, MonitorPlay, Gamepad2, Clock
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -60,7 +61,7 @@ const getNativeFilePath = (file) => {
 // ============================================================================
 // SUB-COMPONENTS
 // ============================================================================
-const AudioVisualizer = ({ isPlaying, isPaused, type }) => {
+const AudioVisualizer = React.memo(({ isPlaying, isPaused, type }) => {
   if (!isPlaying || ['image', 'goto', 'pause', 'blackout', 'counter', 'transition', 'group', 'time', 'text', 'msc', 'osc', 'stop', 'conditional', 'timer'].includes(type)) return null;
   return (
     <div className="flex items-end gap-[2px] h-3 ml-3 shrink-0" title={isPaused ? "Audio Paused" : "Audio Playing"}>
@@ -69,9 +70,9 @@ const AudioVisualizer = ({ isPlaying, isPaused, type }) => {
       <div className="w-[3px] bg-green-500 rounded-t-sm origin-bottom" style={{ animation: `meter 0.5s ease-in-out infinite alternate 0.4s ${isPaused ? 'paused' : 'running'}`, height: '100%' }} />
     </div>
   );
-};
+});
 
-const AutoAdvanceTimer = ({ cue, isPlaying, isPaused }) => {
+const AutoAdvanceTimer = React.memo(({ cue, isPlaying, isPaused }) => {
   const [timeLeft, setTimeLeft] = useState(cue.duration || 0);
 
   useEffect(() => {
@@ -95,9 +96,9 @@ const AutoAdvanceTimer = ({ cue, isPlaying, isPaused }) => {
       ⏱ {(isPlaying && !isPaused && cue.duration > 0) ? timeLeft.toFixed(1) : (cue.duration || 0)}s
     </span>
   );
-};
+});
 
-const VideoStats = ({ videoId, name }) => {
+const VideoStats = React.memo(({ videoId, name }) => {
   const [fps, setFps] = useState(0);
   const [res, setRes] = useState("Loading...");
   
@@ -132,9 +133,9 @@ const VideoStats = ({ videoId, name }) => {
       <span>FPS: {fps}</span><span>RES: {res}</span>
     </div>
   );
-};
+});
 
-const WarpEditorOverlay = ({ cue, onClose, onSave }) => {
+const WarpEditorOverlay = React.memo(({ cue, onClose, onSave }) => {
   const [pins, setPins] = useState(cue.warpPins || [{x:0,y:0}, {x:1,y:0}, {x:1,y:1}, {x:0,y:1}]);
   const svgRef = useRef(null);
 
@@ -167,9 +168,9 @@ const WarpEditorOverlay = ({ cue, onClose, onSave }) => {
       </div>
     </div>
   );
-};
+});
 
-const MaskEditorOverlay = ({ cue, onClose, onSave }) => {
+const MaskEditorOverlay = React.memo(({ cue, onClose, onSave }) => {
   const [polygons, setPolygons] = useState([]); 
   const [currentPoints, setCurrentPoints] = useState([]); 
   const [mousePos, setMousePos] = useState(null);
@@ -248,34 +249,107 @@ const MaskEditorOverlay = ({ cue, onClose, onSave }) => {
       </div>
     </div>
   );
-};
+});
 
-const CameraMasterPlayer = ({ cue, isPaused }) => {
+const CameraMasterPlayer = React.memo(({ cue, isPaused }) => {
   const videoRef = useRef(null);
+  const rtcConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
+  
   useEffect(() => {
-    let stream = null;
+    let connectMobileCam = null;
     const startCamera = async () => {
       if ((cue.state === 'playing' || cue.state === 'stopping') && cue.cameraLive) {
         try {
-          if (cue.url && (cue.url.startsWith('omt://') || cue.url.startsWith('rtsp://') || cue.url.startsWith('http'))) {
-            if (videoRef.current) { videoRef.current.srcObject = null; videoRef.current.src = cue.url; if (isPaused) videoRef.current.pause(); }
+          if (localStreamRef.current) {
+              localStreamRef.current.getTracks().forEach(t => t.stop());
+              localStreamRef.current = null;
+          }
+          if (cue.url && (cue.url.startsWith('rtsp://') || cue.url.startsWith('http'))) {
+            if (videoRef.current) { 
+              videoRef.current.srcObject = null; 
+              videoRef.current.src = cue.url; 
+              if (isPaused) videoRef.current.pause(); else videoRef.current.play().catch(()=>{});
+            }
+          } else if (cue.url && cue.url.startsWith('webrtc://')) {
+            // Network WebRTC Capture
+            const pc = new RTCPeerConnection({ iceServers: [] });
+            rtcConnectionRef.current = pc;
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            
+            pc.ontrack = (e) => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = null; // Force DOM reset
+                    videoRef.current.srcObject = e.streams[0];
+                    if (!isPaused) videoRef.current.play().catch(()=>{});
+                }
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            // Wait for ICE gathering to complete locally
+            await new Promise(resolve => {
+                if (pc.iceGatheringState === 'complete') resolve();
+                else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+            });
+
+            let res;
+            try {
+                const fetchUrlHttps = cue.url.replace('webrtc://', 'https://');
+                res = await fetch(fetchUrlHttps, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription }) });
+            } catch (httpsErr) {
+                const fetchUrlHttp = cue.url.replace('webrtc://', 'http://');
+                res = await fetch(fetchUrlHttp, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription }) });
+            }
+            
+            if (res && res.ok) {
+                const answer = await res.json();
+                await pc.setRemoteDescription(answer.sdp);
+            }
+          } else if (cue.url === 'mobile-camera') {
+            connectMobileCam = () => {
+                if (window.__mobileCamStream && videoRef.current) {
+                    videoRef.current.srcObject = null; // Force DOM reset
+                    videoRef.current.srcObject = window.__mobileCamStream;
+                    if (!isPaused) videoRef.current.play().catch(()=>{});
+                }
+            };
+            connectMobileCam();
+            window.addEventListener('mobile-cam-ready', connectMobileCam);
           } else {
+            let stream;
             if (cue.url && cue.url.length > 5 && !cue.url.includes('.mp4')) {
               try { stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: cue.url } } }); } 
               catch (fallbackErr) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); }
             } else stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            if (videoRef.current && stream) { videoRef.current.src = ""; videoRef.current.srcObject = stream; if (isPaused) videoRef.current.pause(); }
+            
+            localStreamRef.current = stream;
+            if (videoRef.current && stream) { 
+                videoRef.current.src = ""; 
+                videoRef.current.srcObject = null; // Force DOM reset
+                videoRef.current.srcObject = stream; 
+                if (isPaused) videoRef.current.pause(); else videoRef.current.play().catch(()=>{}); 
+            }
           }
-        } catch (err) {}
+        } catch (err) { console.error("Camera Setup Error:", err); }
       } else {
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(t => t.stop());
+          localStreamRef.current = null;
+        }
         if (videoRef.current) {
-          if (videoRef.current.srcObject) { videoRef.current.srcObject.getTracks().forEach(t => t.stop()); videoRef.current.srcObject = null; }
+          videoRef.current.srcObject = null;
           videoRef.current.src = "";
         }
       }
     };
     startCamera();
-    return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
+    return () => { 
+      if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()); localStreamRef.current = null; }
+      if (rtcConnectionRef.current) { rtcConnectionRef.current.close(); rtcConnectionRef.current = null; }
+      if (connectMobileCam) window.removeEventListener('mobile-cam-ready', connectMobileCam);
+    };
   }, [cue.state, cue.cameraLive, cue.url, isPaused]);
 
   useEffect(() => {
@@ -285,9 +359,9 @@ const CameraMasterPlayer = ({ cue, isPaused }) => {
   }, [isPaused]);
 
   return <video id={`master-cam-${cue.id}`} ref={videoRef} autoPlay playsInline muted crossOrigin="anonymous" className="hidden" />;
-};
+});
 
-const ChromaKeyFilter = ({ cue }) => {
+const ChromaKeyFilter = React.memo(({ cue }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
      const canvas = canvasRef.current;
@@ -335,9 +409,9 @@ const ChromaKeyFilter = ({ cue }) => {
      return () => cancelAnimationFrame(animId);
   }, [cue.id, cue.type, cue.chromaKeyColor, cue.chromaKeySimilarity, cue.chromaKeySmoothness]);
   return <canvas id={`master-chroma-${cue.id}`} ref={canvasRef} className="hidden" />;
-};
+});
 
-const TextMasterPlayer = ({ cue }) => {
+const TextMasterPlayer = React.memo(({ cue }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -382,9 +456,9 @@ const TextMasterPlayer = ({ cue }) => {
     cue.textShadowOffsetY, cue.textSmoothing
   ]);
   return <canvas id={`master-text-${cue.id}`} ref={canvasRef} className="hidden" />;
-};
+});
 
-const TimerMasterPlayer = ({ cue, fadeStateTrackers }) => {
+const TimerMasterPlayer = React.memo(({ cue, fadeStateTrackers }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -454,9 +528,70 @@ const TimerMasterPlayer = ({ cue, fadeStateTrackers }) => {
     return () => cancelAnimationFrame(animId);
   }, [cue, fadeStateTrackers]);
   return <canvas id={`master-timer-${cue.id}`} ref={canvasRef} className="hidden" />;
-};
+});
 
-function Header({
+const MediaInfoBox = React.memo(({ cue }) => {
+  const [info, setInfo] = useState(null);
+
+  useEffect(() => {
+    if (!cue || !cue.url || !['video', 'audio', 'image'].includes(cue.type)) {
+      setInfo(null);
+      return;
+    }
+    
+    let isMounted = true;
+    let retries = 0;
+
+    const checkInfo = () => {
+       if (!isMounted) return;
+       const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : (cue.type === 'audio' ? 'aud' : 'img')}-${cue.id}`);
+       if (!el && retries < 20) { retries++; setTimeout(checkInfo, 500); return; }
+       
+       let res = 'N/A'; let duration = 'N/A';
+       
+       if (el) {
+           if (cue.type === 'video' && el.readyState >= 1) { res = `${el.videoWidth}x${el.videoHeight}`; duration = formatTime(el.duration); }
+           else if (cue.type === 'image' && el.complete && el.naturalWidth) { res = `${el.naturalWidth}x${el.naturalHeight}`; }
+           else if (cue.type === 'audio' && el.readyState >= 1) { duration = formatTime(el.duration); }
+           else if (retries < 20) { retries++; setTimeout(checkInfo, 500); return; }
+       }
+       
+       let pathname = cue.url;
+       try { if (cue.url.startsWith('file://')) { const urlObj = new URL(cue.url); pathname = decodeURIComponent(urlObj.pathname); } } catch(e) {}
+       
+       let filename = pathname.split(/[/\\]/).pop() || '';
+       const extMatch = filename.match(/\.([a-zA-Z0-9]+)$/);
+       const ext = extMatch ? extMatch[1].toUpperCase() : 'UNKNOWN';
+       const pathStr = pathname.substring(0, pathname.lastIndexOf(filename)) || '/';
+       
+       setInfo({ filename, path: pathStr, res, duration, ext, type: cue.type });
+    };
+    
+    checkInfo();
+    return () => { isMounted = false; };
+  }, [cue]);
+
+  if (!info) return null;
+
+  return (
+      <div className="col-span-2 bg-gray-950/80 border border-gray-800 p-3 rounded mt-2 text-[10px] text-gray-400 font-mono space-y-1 relative overflow-hidden">
+         <div className="absolute right-0 top-0 text-[40px] font-bold text-gray-800/30 leading-none pointer-events-none select-none -mt-2 -mr-1">{info.ext}</div>
+         <div className="flex items-center gap-2 border-b border-gray-800 pb-1.5 mb-1.5 text-gray-300 font-bold uppercase tracking-wider">
+             <Activity className="w-3 h-3 text-blue-500" /> Media Information
+         </div>
+         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 relative z-10">
+             <div className="truncate col-span-2" title={info.filename}><span className="text-gray-500">File:</span> <span className="text-gray-200">{info.filename}</span></div>
+             <div><span className="text-gray-500">Type:</span> <span className="text-blue-300">{info.type.toUpperCase()} / {info.ext}</span></div>
+             <div className="truncate" title={info.path}><span className="text-gray-500">Path:</span> {info.path}</div>
+             {info.type !== 'audio' && <div><span className="text-gray-500">Resolution:</span> <span className="text-gray-200">{info.res}</span></div>}
+             {info.type !== 'image' && <div><span className="text-gray-500">Length:</span> <span className="text-gray-200">{info.duration}</span></div>}
+             <div><span className="text-gray-500">Decoder:</span> <span className="text-gray-400 italic">Native Browser</span></div>
+         </div>
+      </div>
+  );
+});
+
+const Header = React.memo(function Header({
   setShowSettingsModal, gpuStatus, setShowNewModal, fileInputRef, folderInputRef, 
   handleSaveShow, handleLoadShow, handleAddFolder, selectedCueIds, cues, 
   isMappingMode, setIsMappingMode, handleResetPins, gridSize, setGridSize, setPins, 
@@ -510,9 +645,124 @@ function Header({
       </div>
     </header>
   );
-}
+});
 
-function CueList({
+const TimelineView = React.memo(({ cues, selectedCueIds, setSelectedCueIds, setLastSelectedId, scrollCueIntoView }) => {
+  const playingCues = cues.filter(c => c.state === 'playing' || c.state === 'stopping');
+  let targetGroup = null;
+  let targetSingle = null;
+
+  // 1. Prioritize showing the group of the actively playing cue
+  if (playingCues.length > 0) {
+    const latestCue = playingCues.reduce((latest, current) => (current.triggerTime || 0) > (latest.triggerTime || 0) ? current : latest);
+    const groupId = latestCue.type === 'group' ? latestCue.id : latestCue.groupId;
+    targetGroup = cues.find(c => c.id === groupId && c.type === 'group');
+    if (!targetGroup && latestCue.type !== 'group') targetSingle = latestCue;
+  }
+
+  // 2. If nothing is playing, fallback to the selected cue (or parent of selected cue)
+  if (!targetGroup && !targetSingle) {
+    const selectedId = selectedCueIds[0];
+    const selectedCue = cues.find(c => c.id === selectedId);
+    if (selectedCue && selectedCue.type === 'group') {
+      targetGroup = selectedCue;
+    } else if (selectedCue) {
+      if (selectedCue.groupId) targetGroup = cues.find(c => c.id === selectedCue.groupId);
+      if (!targetGroup) targetSingle = selectedCue;
+    }
+  }
+
+  if (!targetGroup && !targetSingle) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-gray-600 bg-gray-950">
+        <Activity className="w-12 h-12 mb-4 opacity-20" />
+        <p className="text-sm font-bold tracking-widest uppercase">Timeline View</p>
+        <p className="text-xs mt-2 text-center max-w-[250px]">Play a sequence or select a Cue to visualize its timeline.</p>
+      </div>
+    );
+  }
+
+  let timelineData = [];
+  let headerName = "";
+  let headerMode = "";
+
+  if (targetGroup) {
+    const children = cues.filter(c => c.groupId === targetGroup.id);
+    if (children.length === 0) return <div className="flex-1 flex items-center justify-center text-sm text-gray-600 bg-gray-950">Group is empty.</div>;
+
+    let currentTime = 0;
+    timelineData = children.map(child => {
+       const startTime = targetGroup.groupMode === 'fire-all' ? 0 : currentTime;
+       const dur = parseFloat(child.duration) || 0;
+       const visDuration = dur > 0 ? dur : 5; 
+       
+       if (targetGroup.groupMode !== 'fire-all' && child.followAction === 'auto-follow') {
+           currentTime += dur;
+       }
+       return { ...child, startTime, visDuration };
+    });
+    headerName = targetGroup.name;
+    headerMode = targetGroup.groupMode;
+  } else if (targetSingle) {
+    const dur = parseFloat(targetSingle.duration) || 0;
+    const visDuration = dur > 0 ? dur : 5;
+    timelineData = [{ ...targetSingle, startTime: 0, visDuration }];
+    headerName = targetSingle.name;
+    headerMode = "single cue";
+  }
+
+  const maxTime = Math.max(...timelineData.map(d => d.startTime + d.visDuration), 15);
+  const PIXELS_PER_SEC = 50;
+
+  return (
+    <div className="flex-1 flex flex-col bg-gray-950 overflow-hidden relative">
+      <div className="bg-gray-900 border-b border-gray-800 flex items-center pr-4 pl-40 py-3 shrink-0 justify-between">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+          <Clock className="w-4 h-4 text-blue-500" /> Sequence: {headerName}
+        </h3>
+        <span className="text-[10px] text-gray-500 font-mono tracking-widest">MODE: {headerMode.toUpperCase()}</span>
+      </div>
+      
+      <div className="flex-1 overflow-auto relative custom-scrollbar bg-[#0a0a0a]">
+        {/* Time Ruler */}
+        <div className="sticky top-0 z-20 h-6 bg-gray-900/90 backdrop-blur border-b border-gray-800 flex" style={{ width: Math.max(800, maxTime * PIXELS_PER_SEC + 100) }}>
+           {Array.from({ length: Math.ceil(maxTime) + 2 }).map((_, i) => (
+             <div key={`ruler-${i}`} className="absolute h-full border-l border-gray-700 text-[9px] text-gray-500 pl-1" style={{ left: i * PIXELS_PER_SEC }}>
+               {i}s
+             </div>
+           ))}
+        </div>
+
+        {/* Tracks Area */}
+        <div className="relative pt-2 pb-8" style={{ width: Math.max(800, maxTime * PIXELS_PER_SEC + 100), height: (timelineData.length * 45) + 40 }}>
+           {timelineData.map((d, i) => (
+             <div 
+               key={d.id} 
+               onClick={() => {
+                 setSelectedCueIds([d.id]);
+                 setLastSelectedId(d.id);
+                 scrollCueIntoView(d.id);
+               }}
+               className={`absolute h-8 rounded flex flex-col justify-center px-2 overflow-hidden shadow-md text-[10px] font-semibold tracking-wider text-white border transition-opacity ${d.state === 'playing' ? 'bg-green-600 border-green-500 z-10' : d.state === 'stopping' ? 'bg-yellow-600 border-yellow-500 z-10' : 'bg-blue-900/60 border-blue-700 hover:bg-blue-800/80 cursor-pointer'}`}
+               style={{ left: d.startTime * PIXELS_PER_SEC, width: d.visDuration * PIXELS_PER_SEC, top: (i * 45) + 8 }}
+               title={`${d.number} - ${d.name} (${d.visDuration}s)`}
+             >
+               <div className="truncate w-full relative z-10 flex justify-between">
+                 <span>{d.name}</span>
+                 <span className="opacity-50">{d.type}</span>
+               </div>
+               {/* Visual Fade Overlays */}
+               {d.fadeInTime > 0 && <div className="absolute top-0 left-0 bottom-0 bg-black/40 border-r border-white/20" style={{ width: d.fadeInTime * PIXELS_PER_SEC, clipPath: 'polygon(0 100%, 100% 100%, 100% 0)' }} />}
+               {d.fadeOutTime > 0 && <div className="absolute top-0 right-0 bottom-0 bg-black/40 border-l border-white/20" style={{ width: d.fadeOutTime * PIXELS_PER_SEC, clipPath: 'polygon(0 100%, 100% 100%, 0 0)' }} />}
+             </div>
+           ))}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const CueList = React.memo(function CueList({
   cues, setCues, selectedCueIds, setSelectedCueIds, setLastSelectedId, 
   getNativeFilePath, folderInputRef, isVisible, getIndent, handleCueClick, 
   mediaTimes, isPaused, setIsPaused, stopCue, handleGo, handleStopAll, handleRenumberCues
@@ -613,7 +863,7 @@ function CueList({
         </div>
       )}
       <div className="flex flex-col shrink-0 bg-gray-800/50 border-b border-gray-800">
-         <div className="flex justify-between items-center px-2 py-2">
+         <div className="flex justify-between items-center pr-2 pl-40 py-2">
             <div className="flex items-center gap-2">
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Cue List</div>
               <div className="flex items-center bg-gray-950 border border-gray-700 rounded px-1.5 py-0.5 ml-2">
@@ -624,7 +874,7 @@ function CueList({
             <div className="flex gap-1">
               <button onClick={handleRenumberCues} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="Renumber All Cues"><Hash className="w-4 h-4" /></button>
               <button onClick={() => folderInputRef.current?.click()} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="Add Folder"><FolderPlus className="w-4 h-4" /></button>
-              <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', followAction: 'none', duration: 0, fadeInTime: 0, fadeOutTime: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
+              <button onClick={() => { const newId = Date.now().toString(); setCues([...cues, { id: newId, number: (cues.length + 1).toString(), type: 'video', name: 'New Cue', description: '', url: '', state: 'stopped', loop: false, triggerBehavior: 'overlap', followAction: 'none', duration: 0, fadeInTime: 0, fadeOutTime: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }]); setSelectedCueIds([newId]); setLastSelectedId(newId); }} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
               <button onClick={() => { const remaining = cues.filter(c => !selectedCueIds.includes(c.id)); setCues(remaining); setSelectedCueIds(remaining.length > 0 ? [remaining[0].id] : []); setLastSelectedId(remaining.length > 0 ? remaining[0].id : null); }} className="p-1 hover:bg-red-900/50 rounded text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
             </div>
          </div>
@@ -670,6 +920,8 @@ function CueList({
                 
                 {cue.followAction === 'auto-follow' && <ArrowRight className="w-3 h-3 text-green-500 ml-2 flex-shrink-0" title="Auto-follows to next cue on end" />}
                 
+                {cue.type === 'conditional' && cue.conditionRunMode === 'continuous' && isPlaying && <Ear className="w-3 h-3 text-emerald-500 ml-2 flex-shrink-0 animate-pulse" title="Listening for condition..." />}
+                
                 <AutoAdvanceTimer cue={cue} isPlaying={isPlaying} isPaused={isPaused} />
                 <AudioVisualizer isPlaying={isPlaying || isStopping} isPaused={isPaused} type={cue.type} />
               </div>
@@ -686,11 +938,12 @@ function CueList({
       </div>
     </div>
   );
-}
+});
 
-function Inspector({ 
+const Inspector = React.memo(function Inspector({ 
   cues, setCues, selectedCueIds, activeCues, isMixed, getSharedVal, updateSelectedCues, 
-  getNativeFilePath, videoDevices, hardwareDisplays, setEditingMaskCueId, setEditingWarpCueId
+  getNativeFilePath, videoDevices, hardwareDisplays, setEditingMaskCueId, setEditingWarpCueId,
+  handleUrlBlur
 }) {
   return (
     <div className="h-1/3 bg-gray-900 flex flex-col shrink-0 overflow-hidden">
@@ -721,7 +974,7 @@ function Inspector({
                             timerDuration: c.timerDuration || 60, timerStyle: c.timerStyle || 'countdown', timerFormat: c.timerFormat || 'MM:SS', timerVisible: c.timerVisible ?? true,
                             textColor: c.textColor || '#ffffff', textScale: c.textScale || 120, textAlign: c.textAlign || 'center', fontFamily: c.fontFamily || 'sans-serif', fontWeight: c.fontWeight || 'bold', fontStyle: c.fontStyle || 'normal', textX: c.textX ?? 50, textY: c.textY ?? 50, textShadowEnabled: c.textShadowEnabled || false, textShadowColor: c.textShadowColor || '#000000', textShadowBlur: c.textShadowBlur ?? 10, textShadowOffsetX: c.textShadowOffsetX ?? 5, textShadowOffsetY: c.textShadowOffsetY ?? 5, textSmoothing: c.textSmoothing ?? true 
                           }
-                          else if (newType === 'conditional') extraProps = { conditionType: c.conditionType || 'cue-state', conditionTargetCue: c.conditionTargetCue || '', conditionState: c.conditionState || 'playing', conditionOscPath: c.conditionOscPath || '/tuxshow/sensor', conditionOscValue: c.conditionOscValue || '1', trueTargetCue: c.trueTargetCue || '', falseTargetCue: c.falseTargetCue || '' };
+                          else if (newType === 'conditional') extraProps = { conditionRunMode: c.conditionRunMode || 'immediate', conditionType: c.conditionType || 'cue-state', conditionTargetCue: c.conditionTargetCue || '', conditionState: c.conditionState || 'playing', conditionOscPath: c.conditionOscPath || '/tuxshow/sensor', conditionOscValue: c.conditionOscValue || '1', trueTargetCue: c.trueTargetCue || '', falseTargetCue: c.falseTargetCue || '' };
                           else if (newType === 'osc') extraProps = { oscIp: c.oscIp || '127.0.0.1', oscPort: c.oscPort || 53000, oscAddress: c.oscAddress || '/tuxshow/go', oscArgs: c.oscArgs || '' };
                           else if (newType === 'msc') extraProps = { mscDevice: c.mscDevice || '0', mscCommand: c.mscCommand || 'GO', mscCue: c.mscCue || '1' };
                           else if (newType === 'goto') extraProps = { gotoMode: c.gotoMode || 'specific', targetCueNumber: c.targetCueNumber || '', targetCueRangeMin: c.targetCueRangeMin || '', targetCueRangeMax: c.targetCueRangeMax || '' };
@@ -730,6 +983,7 @@ function Inspector({
                           else if (newType === 'stop') extraProps = { targetCueNumber: c.targetCueNumber || '' };
                           else if (newType === 'time') extraProps = { scheduleTime: c.scheduleTime || '', scheduleDate: c.scheduleDate || '' };
                           else if (newType === 'group') extraProps = { groupMode: c.groupMode || 'fire-all' };
+                          else if (newType === 'animate') extraProps = { animTargetCue: '', animProperty: 'posX', animStartValue: 0, animEndValue: 100, duration: 2.0 };
                           
                           if (['video','image','camera','text','timer'].includes(newType)) {
                               extraProps = { ...extraProps, scaleX: c.scaleX ?? 100, scaleY: c.scaleY ?? 100, keepAspect: c.keepAspect ?? true, posX: c.posX ?? 50, posY: c.posY ?? 50, cropTop: c.cropTop ?? 0, cropBottom: c.cropBottom ?? 0, cropLeft: c.cropLeft ?? 0, cropRight: c.cropRight ?? 0, outlineEnabled: c.outlineEnabled ?? false, outlineColor: c.outlineColor ?? '#ffffff', outlineWidth: c.outlineWidth ?? 2, warpEnabled: c.warpEnabled ?? false, warpPins: c.warpPins || [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}] };
@@ -740,7 +994,7 @@ function Inspector({
                     }));
                 }} className="flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 outline-none">
                   {isMixed('type') && <option value="mixed" disabled hidden>-- Mixed Types --</option>}
-                  <option value="video">Video Media</option><option value="audio">Audio Only</option><option value="image">Image Graphic</option><option value="camera">Live Capture</option><option value="text">Text / Title</option><option value="timer">Canvas Timer</option><option value="blackout">Stage Blackout</option><option value="pause">Pause Show</option><option value="goto">GoTo Pointer</option><option value="counter">Loop Counter</option><option value="transition">Scene Transition</option><option value="time">Time / Scheduled</option><option value="conditional">Conditional (If/Then)</option><option value="stop">Targeted Stop</option><option value="msc">MSC (MIDI Show Control)</option><option value="osc">OSC (Open Sound Control)</option><option value="group">Group / Folder</option>
+                  <option value="video">Video Media</option><option value="audio">Audio Only</option><option value="image">Image Graphic</option><option value="camera">Live Capture</option><option value="text">Text / Title</option><option value="timer">Canvas Timer</option><option value="blackout">Stage Blackout</option><option value="pause">Pause Show</option><option value="goto">GoTo Pointer</option><option value="counter">Loop Counter</option><option value="transition">Scene Transition</option><option value="time">Time / Scheduled</option><option value="conditional">Conditional (If/Then)</option><option value="stop">Targeted Stop</option><option value="msc">MSC (MIDI Show Control)</option><option value="osc">OSC (Open Sound Control)</option><option value="group">Group / Folder</option><option value="animate">Animate / Tween</option>
                 </select>
               </div>
             </div>
@@ -766,21 +1020,23 @@ function Inspector({
                   <input type="text" value={isMixed('url') ? '' : getSharedVal('url', '')} placeholder={isMixed('url') ? '<Multiple Values>' : ''} onChange={(e) => updateSelectedCues('url', e.target.value)} className="flex-1 bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-xs font-mono text-gray-200 outline-none" />
                   <button onClick={() => { const input = document.createElement('input'); input.type='file'; input.onchange=(e)=>{const file=e.target.files[0]; if(file){ updateSelectedCues('url', getNativeFilePath(file)); updateSelectedCues('name', file.name); }}; input.click(); }} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-4 py-1.5 text-xs font-semibold text-gray-300 transition-colors cursor-pointer">Browse File</button>
                 </div>
+                {!isMixed('url') && activeCues.length === 1 && <MediaInfoBox cue={activeCues[0]} />}
               </div>
             )}
             {getSharedVal('type') === 'camera' && (
               <div className="col-span-2 flex gap-4">
                  <div className="flex-1">
                     <label className="block text-xs text-gray-500 mb-1">Hardware Capture Device</label>
-                    <select value={isMixed('url') ? 'mixed' : getSharedVal('url', '')} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-2 py-1.5 text-sm font-mono text-gray-200 outline-none">
+                    <select value={isMixed('url') ? 'mixed' : (getSharedVal('url', '').startsWith('http') || getSharedVal('url', '').startsWith('rtsp') || getSharedVal('url', '').startsWith('webrtc') ? '' : getSharedVal('url', ''))} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-2 py-1.5 text-sm font-mono text-gray-200 outline-none">
                       {isMixed('url') && <option value="mixed" disabled hidden>-- Mixed Devices --</option>}
                       <option value="">Default System Camera</option>
+                      <option value="mobile-camera">Mobile App Camera (PWA)</option>
                       {videoDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.slice(0,5)}...)`}</option>)}
                     </select>
                  </div>
                  <div className="flex-1">
-                    <label className="block text-xs text-gray-500 mb-1">Or Network Stream (OMT/RTSP/HTTP)</label>
-                    <input type="text" placeholder={isMixed('url') ? '<Multiple Values>' : "omt://..."} value={isMixed('url') ? '' : (!getSharedVal('url', '').includes('://') && getSharedVal('url', '').length > 15 ? '' : getSharedVal('url', ''))} onChange={(e) => updateSelectedCues('url', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-xs font-mono text-gray-200 outline-none" />
+                    <label className="block text-xs text-gray-500 mb-1">Network Stream URL (WebRTC/HTTP/RTSP)</label>
+                    <input list="url-history" type="text" placeholder={isMixed('url') ? '<Multiple Values>' : "webrtc://127.0.0.1:8554/display1"} value={isMixed('url') ? '' : (!getSharedVal('url', '').includes('://') && getSharedVal('url', '').length > 15 ? '' : getSharedVal('url', ''))} onChange={(e) => updateSelectedCues('url', e.target.value)} onBlur={(e) => handleUrlBlur(e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-1.5 text-xs font-mono text-gray-200 outline-none" />
                  </div>
               </div>
             )}
@@ -791,6 +1047,7 @@ function Inspector({
                   <select value={isMixed('targetDisplay') ? 'mixed' : getSharedVal('targetDisplay', 'all')} onChange={(e) => updateSelectedCues('targetDisplay', e.target.value)} className="w-full bg-blue-950/20 border border-blue-800/40 rounded px-2 py-1.5 text-sm font-mono text-blue-200 outline-none focus:border-blue-500">
                     {isMixed('targetDisplay') && <option value="mixed" disabled hidden>-- Mixed Displays --</option>}
                     <option value="all">All Displays</option>
+                    <option value="webrtc">Virtual WebRTC Output Only</option>
                     {hardwareDisplays.map(d => (<option key={d.id} value={d.id}>{d.label} {d.isPrimary ? '(Primary)' : ''}</option>))}
                   </select>
                 </div>
@@ -878,13 +1135,52 @@ function Inspector({
                   </div>
                 </div>
             )}
+
+            {getSharedVal('type') === 'animate' && (
+              <div className="col-span-2 bg-gray-950/50 p-4 rounded border border-gray-800 space-y-4">
+                <h4 className="text-xs font-bold text-indigo-500 uppercase tracking-wider border-b border-gray-800 pb-2 flex items-center gap-2"><Move className="w-4 h-4"/> Animate / Tween Settings</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] text-indigo-400 mb-1 font-bold uppercase tracking-wider">Target Cue Number</label>
+                    <input type="text" value={isMixed('animTargetCue') ? '' : getSharedVal('animTargetCue', '')} onChange={(e)=>updateSelectedCues('animTargetCue', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1.5 text-sm outline-none" placeholder="e.g. 1.5" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-indigo-400 mb-1 font-bold uppercase tracking-wider">Property to Animate</label>
+                    <select value={isMixed('animProperty') ? 'mixed' : getSharedVal('animProperty', 'posX')} onChange={(e)=>updateSelectedCues('animProperty', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1.5 text-sm outline-none">
+                      <option value="posX">Pos X %</option>
+                      <option value="posY">Pos Y %</option>
+                      <option value="scaleX">Scale X %</option>
+                      <option value="scaleY">Scale Y %</option>
+                      <option value="customOpacity">Opacity (0 to 1)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-indigo-400 mb-1 font-bold uppercase tracking-wider">Start Value</label>
+                    <input type="number" step="any" value={isMixed('animStartValue') ? '' : getSharedVal('animStartValue', 0)} onChange={(e)=>updateSelectedCues('animStartValue', parseFloat(e.target.value)||0)} className="w-full bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1.5 text-sm outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-indigo-400 mb-1 font-bold uppercase tracking-wider">End Value</label>
+                    <input type="number" step="any" value={isMixed('animEndValue') ? '' : getSharedVal('animEndValue', 100)} onChange={(e)=>updateSelectedCues('animEndValue', parseFloat(e.target.value)||0)} className="w-full bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1.5 text-sm outline-none" />
+                  </div>
+                </div>
+                <p className="text-[9px] text-gray-500 italic mt-2">* Ensure Duration is set in the Timing section below. Target media cue must be playing.</p>
+              </div>
+            )}
             
             {getSharedVal('type') === 'conditional' && (
               <div className="col-span-2 bg-gray-950/50 p-4 rounded border border-gray-800 space-y-4">
                 <h4 className="text-xs font-bold text-emerald-500 uppercase tracking-wider border-b border-gray-800 pb-2 flex items-center gap-2"><GitBranch className="w-4 h-4"/> Conditional Logic (If / Then)</h4>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4 mb-2">
                   <div>
+                    <label className="block text-[10px] text-gray-400 mb-1 font-bold uppercase tracking-wider">Run Mode</label>
+                    <select value={isMixed('conditionRunMode') ? 'mixed' : getSharedVal('conditionRunMode', 'immediate')} onChange={(e)=>updateSelectedCues('conditionRunMode', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-emerald-500 rounded px-2 py-1.5 text-sm outline-none">
+                      {isMixed('conditionRunMode') && <option value="mixed" disabled hidden>Mixed</option>}
+                      <option value="immediate">Evaluate Once on GO</option>
+                      <option value="continuous">Keep Listening</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
                     <label className="block text-[10px] text-gray-400 mb-1 font-bold uppercase tracking-wider">Evaluation Type</label>
                     <select value={isMixed('conditionType') ? 'mixed' : getSharedVal('conditionType', 'cue-state')} onChange={(e)=>updateSelectedCues('conditionType', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-emerald-500 rounded px-2 py-1.5 text-sm outline-none">
                       {isMixed('conditionType') && <option value="mixed" disabled hidden>Mixed</option>}
@@ -892,6 +1188,9 @@ function Inspector({
                       <option value="osc-value">Check Incoming OSC Value</option>
                     </select>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
                   
                   {getSharedVal('conditionType') === 'cue-state' ? (
                      <div className="flex gap-2">
@@ -902,7 +1201,7 @@ function Inspector({
                         <div className="flex-1">
                           <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider">Is Currently</label>
                           <select value={isMixed('conditionState') ? 'mixed' : getSharedVal('conditionState', 'playing')} onChange={(e)=>updateSelectedCues('conditionState', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-emerald-500 rounded px-2 py-1.5 text-sm outline-none">
-                            <option value="playing">Playing</option><option value="stopped">Stopped</option>
+                             <option value="playing">Playing</option><option value="stopped">Stopped</option><option value="completed">Completed</option>
                           </select>
                         </div>
                      </div>
@@ -922,13 +1221,17 @@ function Inspector({
 
                 <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-800">
                   <div>
-                    <label className="block text-[10px] text-green-400 mb-1 font-bold uppercase tracking-wider">If TRUE: Fire Cue #</label>
+                    <label className="block text-[10px] text-green-400 mb-1 font-bold uppercase tracking-wider">
+                      {getSharedVal('conditionRunMode', 'immediate') === 'continuous' ? 'When TRUE: Fire Cue #' : 'If TRUE: Fire Cue #'}
+                    </label>
                     <input type="text" value={isMixed('trueTargetCue') ? '' : getSharedVal('trueTargetCue', '')} onChange={(e)=>updateSelectedCues('trueTargetCue', e.target.value)} className="w-full bg-gray-900 border border-green-700/50 focus:border-green-500 rounded px-2 py-1.5 text-sm outline-none" />
                   </div>
-                  <div>
-                    <label className="block text-[10px] text-red-400 mb-1 font-bold uppercase tracking-wider">If FALSE: Fire Cue #</label>
-                    <input type="text" value={isMixed('falseTargetCue') ? '' : getSharedVal('falseTargetCue', '')} onChange={(e)=>updateSelectedCues('falseTargetCue', e.target.value)} className="w-full bg-gray-900 border border-red-700/50 focus:border-red-500 rounded px-2 py-1.5 text-sm outline-none" />
-                  </div>
+                  {getSharedVal('conditionRunMode', 'immediate') !== 'continuous' && (
+                    <div>
+                      <label className="block text-[10px] text-red-400 mb-1 font-bold uppercase tracking-wider">If FALSE: Fire Cue #</label>
+                      <input type="text" value={isMixed('falseTargetCue') ? '' : getSharedVal('falseTargetCue', '')} onChange={(e)=>updateSelectedCues('falseTargetCue', e.target.value)} className="w-full bg-gray-900 border border-red-700/50 focus:border-red-500 rounded px-2 py-1.5 text-sm outline-none" />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1215,33 +1518,44 @@ function Inspector({
               </div>
             )}
 
-            {['video', 'image', 'camera'].includes(getSharedVal('type')) && (
+            {['video', 'image', 'camera', 'text', 'timer'].includes(getSharedVal('type')) && (
               <>
                 <div className="col-span-2 bg-gray-950/50 p-4 rounded border border-gray-800 space-y-4">
-                  <h4 className="text-xs font-bold text-yellow-500 uppercase tracking-wider flex items-center gap-2"><Palette className="w-4 h-4"/> Color Correction (HSB)</h4>
-                  <div className="flex items-center gap-4 border-b border-gray-800 pb-2">
-                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                       <input type="checkbox" checked={getSharedVal('colorFilterEnabled', false)} onChange={(e) => updateSelectedCues('colorFilterEnabled', e.target.checked)} className="w-4 h-4 bg-gray-900 border-gray-700 rounded text-yellow-500 focus:ring-yellow-500" /> 
-                       Enable Hardware Filter
-                    </label>
+                  <h4 className="text-xs font-bold text-yellow-500 uppercase tracking-wider flex items-center gap-2"><Palette className="w-4 h-4"/> Color & Opacity</h4>
+                  
+                  <div className="flex items-center gap-2">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider w-16">Opacity</label>
+                      <input type="range" min="0" max="1" step="0.05" value={isMixed('customOpacity') ? 1 : (getSharedVal('customOpacity') ?? 1)} onChange={(e) => updateSelectedCues('customOpacity', parseFloat(e.target.value))} className="flex-1 accent-blue-500" />
+                      <span className="text-xs text-gray-400 w-8 text-right">{isMixed('customOpacity') ? '--' : `${Math.round((getSharedVal('customOpacity') ?? 1) * 100)}%`}</span>
                   </div>
-                  {getSharedVal('colorFilterEnabled') && (
-                    <div className="grid grid-cols-3 gap-4">
-                       <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-gray-400 font-bold uppercase">Hue Shift (deg)</label>
-                          <input type="range" min="0" max="360" value={isMixed('hue') ? 0 : getSharedVal('hue', 0)} onChange={(e) => updateSelectedCues('hue', parseInt(e.target.value))} className="w-full accent-yellow-500" />
-                          <span className="text-xs text-gray-500">{getSharedVal('hue', 0)}°</span>
-                       </div>
-                       <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-gray-400 font-bold uppercase">Saturation %</label>
-                          <input type="range" min="0" max="200" value={isMixed('saturation') ? 100 : getSharedVal('saturation', 100)} onChange={(e) => updateSelectedCues('saturation', parseInt(e.target.value))} className="w-full accent-yellow-500" />
-                          <span className="text-xs text-gray-500">{getSharedVal('saturation', 100)}%</span>
-                       </div>
-                       <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-gray-400 font-bold uppercase">Brightness %</label>
-                          <input type="range" min="0" max="200" value={isMixed('brightness') ? 100 : getSharedVal('brightness', 100)} onChange={(e) => updateSelectedCues('brightness', parseInt(e.target.value))} className="w-full accent-yellow-500" />
-                          <span className="text-xs text-gray-500">{getSharedVal('brightness', 100)}%</span>
-                       </div>
+
+                  {['video', 'image', 'camera'].includes(getSharedVal('type')) && (
+                    <div className="space-y-4 pt-4 border-t border-gray-800">
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                          <input type="checkbox" checked={getSharedVal('colorFilterEnabled', false)} onChange={(e) => updateSelectedCues('colorFilterEnabled', e.target.checked)} className="w-4 h-4 bg-gray-900 border-gray-700 rounded text-yellow-500 focus:ring-yellow-500" /> 
+                          Enable Color Correction (HSB)
+                        </label>
+                      </div>
+                      {getSharedVal('colorFilterEnabled') && (
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="flex flex-col gap-1">
+                              <label className="text-[10px] text-gray-400 font-bold uppercase">Hue Shift (deg)</label>
+                              <input type="range" min="0" max="360" value={isMixed('hue') ? 0 : getSharedVal('hue', 0)} onChange={(e) => updateSelectedCues('hue', parseInt(e.target.value))} className="w-full accent-yellow-500" />
+                              <span className="text-xs text-gray-500">{getSharedVal('hue', 0)}°</span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                              <label className="text-[10px] text-gray-400 font-bold uppercase">Saturation %</label>
+                              <input type="range" min="0" max="200" value={isMixed('saturation') ? 100 : getSharedVal('saturation', 100)} onChange={(e) => updateSelectedCues('saturation', parseInt(e.target.value))} className="w-full accent-yellow-500" />
+                              <span className="text-xs text-gray-500">{getSharedVal('saturation', 100)}%</span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                              <label className="text-[10px] text-gray-400 font-bold uppercase">Brightness %</label>
+                              <input type="range" min="0" max="200" value={isMixed('brightness') ? 100 : getSharedVal('brightness', 100)} onChange={(e) => updateSelectedCues('brightness', parseInt(e.target.value))} className="w-full accent-yellow-500" />
+                              <span className="text-xs text-gray-500">{getSharedVal('brightness', 100)}%</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1356,14 +1670,19 @@ function Inspector({
                 )}
               </div>
             )}
+
+            <div className="col-span-2 bg-gray-950/50 p-4 rounded border border-gray-800 space-y-2 mt-2">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2"><Edit3 className="w-4 h-4"/> Cue Notes / Description</label>
+              <textarea value={isMixed('description') ? '' : getSharedVal('description', '')} placeholder={isMixed('description') ? '<Multiple Values>' : 'Enter media details or cue notes here...'} onChange={(e)=>updateSelectedCues('description', e.target.value)} className="w-full bg-gray-900 border border-gray-700 focus:border-blue-500 rounded px-3 py-2 text-sm text-gray-300 outline-none h-20 custom-scrollbar resize-y" />
+            </div>
           </div>
         </div>
       ) : <div className="flex-1 flex items-center justify-center text-sm text-gray-600">Select a cue to inspect.</div>}
     </div>
   );
-}
+});
 
-function StagePreview({
+const StagePreview = React.memo(function StagePreview({
   stageRef, activeMediaCues, pins, gridSize, stageSize, quadW, quadH,
   isMappingMode, handlePinDrag, showStats
 }) {
@@ -1381,7 +1700,7 @@ function StagePreview({
         {activeMediaCues.filter(c => !['goto','pause','counter','group','time','msc','osc','stop','conditional'].includes(c.type)).length === 0 && <div className="absolute inset-0 flex items-center justify-center text-gray-500 font-mono tracking-widest pointer-events-none uppercase text-xs z-0">Stage Preview</div>}
         
         <div ref={stageRef} className="absolute inset-0 pointer-events-none z-10">
-          {activeMediaCues.length > 0 ? (pins.length === (gridSize.x + 1) * (gridSize.y + 1) && quads.map((quad, qIdx) => {
+          {pins.length === (gridSize.x + 1) * (gridSize.y + 1) && quads.map((quad, qIdx) => {
             const pt_tl = { x: pins[quad.indices[0]].x * stageSize.w, y: pins[quad.indices[0]].y * stageSize.h };
             const pt_tr = { x: pins[quad.indices[1]].x * stageSize.w, y: pins[quad.indices[1]].y * stageSize.h };
             const pt_br = { x: pins[quad.indices[2]].x * stageSize.w, y: pins[quad.indices[2]].y * stageSize.h };
@@ -1392,7 +1711,7 @@ function StagePreview({
                 <canvas id={`quad-ctx-local-${qIdx}-2`} className="absolute top-0 left-0 origin-top-left pointer-events-none" style={{ width: quadW, height: quadH, transform: getAffineTransform(quadW, quadH, pt_tr, pt_br, pt_bl, 2), clipPath: 'polygon(100% 0, 100% 100%, 0 100%)' }} />
               </Fragment>
             );
-          })) : null}
+          })}
         </div>
         
         {isMappingMode && pins.map((pin, i) => (<div key={i} className="absolute w-6 h-6 -ml-3 -mt-3 bg-white border-2 border-blue-500 rounded-full shadow-lg cursor-move z-50 flex items-center justify-center hover:scale-125 transition-transform" style={{ left: pin.x * stageSize.w, top: pin.y * stageSize.h }} onPointerDown={(e) => { e.target.setPointerCapture(e.pointerId); const onMove = (moveEvt) => handlePinDrag(i, moveEvt); const onUp = () => { e.target.releasePointerCapture(e.pointerId); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); }} ><div className="w-2 h-2 bg-blue-500 rounded-full"/></div>))}
@@ -1407,17 +1726,20 @@ function StagePreview({
       </div>
     </div>
   );
-}
+});
 
-function StatusBar({ localIp, virtualDisplayConfig, ioConfig }) {
+const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig, ioConfig, setShowQrModal }) {
   return (
     <div className="bg-gray-950 border-t border-gray-800 px-4 py-1.5 flex justify-between items-center text-[10px] font-mono tracking-widest text-gray-500 shrink-0 z-50">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5 text-blue-400/80">
           <Wifi className="w-3 h-3" /> HOST IP: {localIp}
+          <button onClick={() => setShowQrModal(true)} className="ml-2 bg-blue-900/50 hover:bg-blue-800 text-blue-300 p-1 rounded transition-colors cursor-pointer" title="Show QR Codes">
+            <QrCode className="w-3 h-3" />
+          </button>
         </span>
-        <span className={`flex items-center gap-1.5 ${virtualDisplayConfig.enabled ? 'text-pink-400/80' : 'text-gray-600'}`}>
-          <Cast className="w-3 h-3" /> VIRTUAL HTTP: {virtualDisplayConfig.enabled ? `ON (http://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path})` : 'OFF'}
+        <span className={`flex items-center gap-1.5 ${virtualDisplayConfig.enabled ? 'text-pink-400/80' : 'text-gray-600'} truncate`} title={`Receiver: webrtc://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}\nBrowser: https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}\nCamera: https://${localIp}:${virtualDisplayConfig.port}/camera`}>
+          <Cast className="w-3 h-3" /> STREAM: {virtualDisplayConfig.enabled ? `RECV: webrtc://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path} | WEB: https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}` : 'OFF'}
         </span>
       </div>
       <div className="flex items-center gap-6">
@@ -1432,7 +1754,109 @@ function StatusBar({ localIp, virtualDisplayConfig, ioConfig }) {
       </div>
     </div>
   );
-}
+});
+
+// ============================================================================
+// DEDICATED RECEIVER MODE
+// ============================================================================
+const DedicatedReceiver = React.memo(({ url }) => {
+  const videoRef = useRef(null);
+  const rtcConnectionRef = useRef(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    let reconnectTimeout = null;
+    let isActive = true;
+
+    const connectWebRTC = async () => {
+      if (!isActive) return;
+      try {
+        setErrorMsg('');
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        rtcConnectionRef.current = pc;
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        
+        pc.ontrack = (e) => {
+            if (videoRef.current) {
+                videoRef.current.srcObject = e.streams[0];
+                videoRef.current.play().catch(()=>{});
+            }
+        };
+        
+        pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState === 'connected') setIsConnected(true);
+            else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+                setIsConnected(false);
+                if (isActive) reconnectTimeout = setTimeout(connectWebRTC, 2000);
+            }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        await new Promise(resolve => {
+            if (pc.iceGatheringState === 'complete') resolve();
+            else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+        });
+
+        let res;
+        try {
+            const fetchUrlHttps = url.replace('webrtc://', 'https://');
+            res = await fetch(fetchUrlHttps, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription.toJSON() }) });
+        } catch (httpsErr) {
+            const fetchUrlHttp = url.replace('webrtc://', 'http://');
+            res = await fetch(fetchUrlHttp, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription.toJSON() }) });
+        }
+        
+        if (res && res.ok) {
+            const answer = await res.json();
+            await pc.setRemoteDescription(answer.sdp);
+        } else {
+            throw new Error(`Server responded with ${res ? res.status : 'Network Error'}`);
+        }
+      } catch (err) {
+        console.error("Receiver WebRTC Error:", err);
+        setErrorMsg(err.message);
+        if (isActive) reconnectTimeout = setTimeout(connectWebRTC, 3000);
+      }
+    };
+    
+    if (url && url.startsWith('webrtc://')) {
+        connectWebRTC();
+    } else if (url && (url.startsWith('http') || url.startsWith('rtsp'))) {
+        if (videoRef.current) {
+            videoRef.current.src = url;
+            videoRef.current.play().catch(()=>{});
+        }
+    }
+
+    return () => { 
+      isActive = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (rtcConnectionRef.current) { rtcConnectionRef.current.close(); rtcConnectionRef.current = null; }
+    };
+  }, [url]);
+
+  return (
+    <div className="w-screen h-screen bg-black overflow-hidden relative cursor-none flex items-center justify-center">
+      <video ref={videoRef} autoPlay playsInline muted crossOrigin="anonymous" className="absolute inset-0 w-full h-full object-contain" />
+      
+      {!isConnected && url.startsWith('webrtc://') && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 text-gray-400">
+           <Wifi className="w-16 h-16 mb-4 animate-pulse opacity-50" />
+           <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Connecting to Stream...</h2>
+           <p className="font-mono text-sm">{url}</p>
+           {errorMsg && <p className="text-red-500 mt-4 text-xs font-mono">{errorMsg}</p>}
+        </div>
+      )}
+
+      <div className="absolute top-4 left-4 z-50 bg-black/50 text-white/30 px-2 py-1 rounded text-[10px] font-mono opacity-0 hover:opacity-100 transition-opacity">
+        Dedicated Receiver Mode — Press Ctrl+Shift+R to Exit
+      </div>
+    </div>
+  );
+});
 
 // ============================================================================
 // MAIN APP COMPONENT
@@ -1443,6 +1867,13 @@ export default function App() {
   const [needsInit, setNeedsInit] = useState(window.location.hash.startsWith('#projector'));
   const [workspaceName, setWorkspaceName] = useState('Untitled Workspace');
   const [isProjectorReady, setIsProjectorReady] = useState(false);
+  const [isReceiver, setIsReceiver] = useState(window.location.hash.startsWith('#receiver'));
+  const [receiverUrl, setReceiverUrl] = useState(() => {
+    if (window.location.hash.startsWith('#receiver-')) {
+       return decodeURIComponent(window.location.hash.replace('#receiver-', ''));
+    }
+    return '';
+  });
   
   const advanceTimers = useRef({}); 
   const fadeIntervals = useRef({});
@@ -1455,14 +1886,24 @@ export default function App() {
   const stageRef = useRef(null);
   const cuesRef = useRef([]);
   const masterCanvasRef = useRef(null); 
-  const virtualMediaRecorderRef = useRef(null);
+  const webrtcCanvasRef = useRef(null);
   const oscValuesRef = useRef({}); 
+  const hostPeerConnectionsRef = useRef({}); // Tracks active WebRTC instances
+  const lastSentStatusRef = useRef(null);
+  const isExecutingRef = useRef(false);
+  const [viewMode, setViewMode] = useState('list');
 
   const [projectorActive, setProjectorActive] = useState(false);
   const projectorWinRef = useRef(null);
 
   useEffect(() => {
-    const handleHash = () => { setIsProjector(window.location.hash.startsWith('#projector')); setDisplayId(window.location.hash.split('-')[1] || 'all'); setNeedsInit(window.location.hash.startsWith('#projector')); };
+    const handleHash = () => { 
+      setIsProjector(window.location.hash.startsWith('#projector')); 
+      setDisplayId(window.location.hash.split('-')[1] || 'all'); 
+      setNeedsInit(window.location.hash.startsWith('#projector')); 
+      setIsReceiver(window.location.hash.startsWith('#receiver'));
+      if (window.location.hash.startsWith('#receiver-')) { setReceiverUrl(decodeURIComponent(window.location.hash.replace('#receiver-', ''))); }
+    };
     window.addEventListener('hashchange', handleHash); return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
@@ -1483,6 +1924,7 @@ export default function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [packPath, setPackPath] = useState('');
   const [isPacking, setIsPacking] = useState(false);
   const [packProgress, setPackProgress] = useState('');
@@ -1497,6 +1939,44 @@ export default function App() {
   const [selectedDisplays, setSelectedDisplays] = useState(() => { try { const saved = localStorage.getItem('tuxshow_displays'); return saved ? JSON.parse(saved) : []; } catch(e) { return []; } });
   const [ioConfig, setIoConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_io_config'); return saved ? JSON.parse(saved) : { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } catch(e) { return { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } });
   const [virtualDisplayConfig, setVirtualDisplayConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_virtual_display'); return saved ? JSON.parse(saved) : { enabled: false, port: 8554, path: '/display1' }; } catch(e) { return { enabled: false, port: 8554, path: '/display1' }; } });
+  const [receiverConfig, setReceiverConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_receiver_config'); return saved ? JSON.parse(saved) : { enabled: false, url: '', displayId: 'primary' }; } catch(e) { return { enabled: false, url: '', displayId: 'primary' }; } });
+
+  const [deckConfig, setDeckConfig] = useState(() => { 
+    try { 
+      const saved = localStorage.getItem('tuxshow_deck_config'); 
+      return saved ? JSON.parse(saved) : { buttons: [
+        { label: 'GO', oscPath: '/tuxshow/go', color: '#16a34a', icon: 'play' },
+        { label: 'STOP ALL', oscPath: '/tuxshow/stop', color: '#dc2626', icon: 'square' },
+        { label: 'PAUSE', oscPath: '/tuxshow/pause', color: '#d97706', icon: 'pause' },
+        { label: 'RESUME', oscPath: '/tuxshow/resume', color: '#2563eb', icon: 'play-circle' },
+        { label: 'PREV', oscPath: '/tuxshow/select/prev', icon: 'skip-back' },
+        { label: 'NEXT', oscPath: '/tuxshow/select/next', icon: 'skip-forward' },
+        { label: 'Theme', oscPath: '/tuxshow/select/cue', oscArgs: '1', icon: 'image' },
+        { label: 'Timer', oscPath: '/tuxshow/select/cue', oscArgs: '2', icon: 'clock' },
+      ] };
+    } catch(e) { return { buttons: [] }; } 
+  });
+
+  const [urlHistory, setUrlHistory] = useState(() => {
+    try { const saved = localStorage.getItem('tuxshow_url_history'); return saved ? JSON.parse(saved) : []; } catch(e) { return []; }
+  });
+
+  const handleUrlBlur = useCallback((val) => {
+    if (val && (val.startsWith('webrtc://') || val.startsWith('http') || val.startsWith('rtsp://'))) {
+      if (!urlHistory.includes(val)) {
+        const newHistory = [val, ...urlHistory].slice(0, 10);
+        setUrlHistory(newHistory);
+        localStorage.setItem('tuxshow_url_history', JSON.stringify(newHistory));
+      }
+    }
+  }, [urlHistory]);
+
+  useEffect(() => { localStorage.setItem('tuxshow_receiver_config', JSON.stringify(receiverConfig)); }, [receiverConfig]);
+
+  useEffect(() => { 
+    localStorage.setItem('tuxshow_deck_config', JSON.stringify(deckConfig)); 
+    try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('update-deck-config', deckConfig); } catch(e) {} 
+  }, [deckConfig]);
 
   const [gridSize, setGridSize] = useState({ x: 1, y: 1 });
   const [pins, setPins] = useState([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }]);
@@ -1536,6 +2016,15 @@ export default function App() {
 
   const evaluateCue = useCallback((cueId, currentCues, depth = 0) => {
     if (depth > 10) return []; const cue = currentCues.find(c => c.id === cueId); if (!cue) return [];
+
+    if ((cue.type === 'audio' || cue.type === 'image') && cue.groupId && cue.state === 'playing') {
+        const siblings = currentCues.filter(c => c.groupId === cue.groupId);
+        const myIndex = siblings.findIndex(c => c.id === cue.id);
+        const nextNonPlaying = siblings.slice(myIndex + 1).find(c => c.state !== 'playing');
+        if (nextNonPlaying) return evaluateCue(nextNonPlaying.id, currentCues, depth + 1);
+        return [];
+    }
+
     if (cue.type === 'goto') {
         if (cue.gotoMode === 'random') {
              const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
@@ -1544,6 +2033,7 @@ export default function App() {
     }
     if (cue.type === 'counter') return [cue]; 
     if (cue.type === 'conditional') {
+        if (cue.conditionRunMode === 'continuous') return [cue];
         let conditionMet = false;
         if (cue.conditionType === 'osc-value') {
             const val = oscValuesRef.current[cue.conditionOscPath];
@@ -1557,15 +2047,17 @@ export default function App() {
         return nextCue ? evaluateCue(nextCue.id, currentCues, depth + 1) : [];
     }
     if (cue.type === 'group') {
-        const children = currentCues.filter(c => c.groupId === cue.id); if (children.length === 0) return [];
-        if (cue.groupMode === 'fire-first') return evaluateCue(children[0].id, currentCues, depth + 1);
-        else return children.flatMap(child => evaluateCue(child.id, currentCues, depth + 1));
+        const children = currentCues.filter(c => c.groupId === cue.id); if (children.length === 0) return [cue];
+        if (cue.groupMode === 'fire-first') return [cue, ...evaluateCue(children[0].id, currentCues, depth + 1)];
+        else return [cue, ...children.flatMap(child => evaluateCue(child.id, currentCues, depth + 1))];
     }
     return [cue];
   }, []);
 
   const handleGo = useCallback(() => {
+    if (isExecutingRef.current) return;
     if (selectedCueIds.length === 0) return; setIsPaused(false); 
+    isExecutingRef.current = true; setTimeout(() => { isExecutingRef.current = false; }, 500);
     setCues(prev => {
       let nextState = [...prev]; const resolvedCues = []; const mutations = {};
       selectedCueIds.forEach(id => {
@@ -1581,7 +2073,7 @@ export default function App() {
       nextState = nextState.map(cue => {
         let updatedCue = { ...cue, ...(mutations[cue.id] || {}) };
         if (resolvedIds.includes(cue.id)) return { ...updatedCue, state: 'playing', triggerTime: Date.now() };
-        if (hasHardStop && !resolvedIds.includes(cue.id) && cue.state === 'playing') return cue.fadeOutTime > 0 ? { ...updatedCue, state: 'stopping' } : { ...updatedCue, state: 'stopped' };
+        if (hasHardStop && !resolvedIds.includes(cue.id) && cue.state === 'playing') return cue.fadeOutTime > 0 ? { ...updatedCue, state: 'stopping' } : { ...updatedCue, state: 'completed' };
         return updatedCue;
       });
       const baseIds = resolvedIds.length > 0 ? resolvedIds : selectedCueIds; const lastTargetIndex = Math.max(...baseIds.map(id => prev.findIndex(c => c.id === id)));
@@ -1592,7 +2084,7 @@ export default function App() {
   }, [selectedCueIds, scrollCueIntoView, evaluateCue]);
 
   const handleStopAll = useCallback(() => { setCues(prev => prev.map(cue => ({ ...cue, state: 'stopped' }))); setIsPaused(false); }, []);
-  const stopCue = (id) => { setCues(prev => prev.map(cue => cue.id === id ? { ...cue, state: cue.state === 'playing' && cue.fadeOutTime > 0 ? 'stopping' : 'stopped' } : cue)); };
+  const stopCue = useCallback((id) => { setCues(prev => prev.map(cue => cue.id === id ? { ...cue, state: cue.state === 'playing' && cue.fadeOutTime > 0 ? 'stopping' : 'completed' } : cue)); }, []);
 
   useEffect(() => {
     if (isProjector) {
@@ -1618,7 +2110,14 @@ export default function App() {
     if (!isProjector) {
       try { const { ipcRenderer } = window.require('electron'); ipcRenderer.invoke('get-gpu-status').then(status => setGpuStatus(typeof status === 'string' ? status : (status ? "Hardware Enabled" : "Probing..."))).catch(() => setGpuStatus("Hardware Unknown")); ipcRenderer.on('projector-closed', () => setProjectorActive(false)); } catch (e) { setGpuStatus("Browser Mode"); }
       try { const os = window.require('os'); const nets = os.networkInterfaces(); for (const name of Object.keys(nets)) { for (const net of nets[name]) { if (net.family === 'IPv4' && !net.internal) { setLocalIp(net.address); return; } } } } catch (e) {}
-      if (navigator.mediaDevices) navigator.mediaDevices.enumerateDevices().then(devices => setVideoDevices(devices.filter(d => d.kind === 'videoinput'))).catch(()=>{});
+        if (navigator.mediaDevices) {
+          navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
+            s.getTracks().forEach(t => t.stop());
+            navigator.mediaDevices.enumerateDevices().then(devices => setVideoDevices(devices.filter(d => d.kind === 'videoinput'))).catch(()=>{});
+          }).catch(() => {
+            navigator.mediaDevices.enumerateDevices().then(devices => setVideoDevices(devices.filter(d => d.kind === 'videoinput'))).catch(()=>{});
+          });
+        }
     }
   }, [isProjector]);
 
@@ -1629,18 +2128,87 @@ export default function App() {
 
   useEffect(() => {
     if (isProjector || !virtualDisplayConfig.enabled) return;
-    const startStream = () => {
-      const canvas = masterCanvasRef.current; if (!canvas) { setTimeout(startStream, 500); return; }
-      try {
-        const stream = canvas.captureStream(30); const recorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp8' }); const { ipcRenderer } = window.require('electron');
-        ipcRenderer.send('start-virtual-display', { port: virtualDisplayConfig.port, path: virtualDisplayConfig.path });
-        recorder.ondataavailable = async (e) => { if (e.data && e.data.size > 0) { const buffer = await e.data.arrayBuffer(); ipcRenderer.send('virtual-display-frame', buffer); } };
-        recorder.start(100); virtualMediaRecorderRef.current = recorder;
-      } catch (err) { }
+
+    try {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('start-virtual-display', { port: virtualDisplayConfig.port, path: virtualDisplayConfig.path });
+    } catch (e) {}
+
+    return () => { 
+      try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('stop-virtual-display'); } catch(e) {} 
     };
-    const timerId = setTimeout(startStream, 1000);
-    return () => { clearTimeout(timerId); if (virtualMediaRecorderRef.current && virtualMediaRecorderRef.current.state !== 'inactive') { virtualMediaRecorderRef.current.stop(); virtualMediaRecorderRef.current = null; } try { window.require('electron').ipcRenderer.send('stop-virtual-display'); } catch(e) {} };
   }, [virtualDisplayConfig.enabled, virtualDisplayConfig.port, virtualDisplayConfig.path, isProjector]);
+
+  useEffect(() => {
+    const handleWebRTCOffer = async (event, { offerId, sdp }) => {
+      if (!webrtcCanvasRef.current) webrtcCanvasRef.current = document.createElement('canvas');
+      const canvas = webrtcCanvasRef.current;
+      if (!canvas) return;
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      hostPeerConnectionsRef.current[offerId] = pc;
+
+      const stream = canvas.captureStream(30);
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.oniceconnectionstatechange = () => {
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+              delete hostPeerConnectionsRef.current[offerId]; pc.close();
+          }
+      };
+
+      await pc.setRemoteDescription(sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await new Promise(resolve => {
+          if (pc.iceGatheringState === 'complete') resolve();
+          else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+      });
+
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('webrtc-answer', { offerId, sdp: pc.localDescription.toJSON() });
+    };
+
+    const handleMobileCamOffer = async (event, { offerId, sdp }) => {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      hostPeerConnectionsRef.current[offerId] = pc;
+
+      pc.ontrack = (e) => {
+          window.__mobileCamStream = e.streams[0];
+          window.dispatchEvent(new Event('mobile-cam-ready'));
+      };
+
+      pc.oniceconnectionstatechange = () => {
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+              delete hostPeerConnectionsRef.current[offerId]; pc.close();
+              window.__mobileCamStream = null;
+          }
+      };
+
+      await pc.setRemoteDescription(sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await new Promise(resolve => {
+          if (pc.iceGatheringState === 'complete') resolve();
+          else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+      });
+
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('webrtc-answer', { offerId, sdp: pc.localDescription.toJSON() });
+    };
+
+    try { 
+      const { ipcRenderer } = window.require('electron'); 
+      ipcRenderer.on('webrtc-offer', handleWebRTCOffer); 
+      ipcRenderer.on('mobile-cam-offer', handleMobileCamOffer); 
+      return () => { 
+        ipcRenderer.removeListener('webrtc-offer', handleWebRTCOffer); 
+        ipcRenderer.removeListener('mobile-cam-offer', handleMobileCamOffer); 
+        Object.values(hostPeerConnectionsRef.current).forEach(pc => pc.close()); 
+      }; 
+    } catch (e) {}
+  }, []);
 
   useEffect(() => {
     if (isProjector) { const handleResize = () => setStageSize({ w: window.innerWidth, h: window.innerHeight }); handleResize(); window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize); } 
@@ -1663,7 +2231,7 @@ export default function App() {
            if (cueMatch) {
               const targetCueNum = cueMatch[1]; const action = cueMatch[2]; const targetCue = currentCues.find(c => String(c.number) === targetCueNum);
               if (targetCue) {
-                 if (action === 'start') { const resolved = evaluateCue(targetCue.id, currentCues); if (resolved.length > 0) { setCues(prev => { const hasHardStop = resolved.some(r => r.triggerBehavior === 'stop-others'); const resolvedIds = resolved.map(r => r.id); return prev.map(c => { if (resolvedIds.includes(c.id)) return { ...c, state: 'playing', triggerTime: Date.now() }; if (hasHardStop && !resolvedIds.includes(c.id) && c.state === 'playing') return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' }; return c; }); }); } } 
+                 if (action === 'start') { const resolved = evaluateCue(targetCue.id, currentCues); if (resolved.length > 0) { setCues(prev => { const hasHardStop = resolved.some(r => r.triggerBehavior === 'stop-others'); const resolvedIds = resolved.map(r => r.id); return prev.map(c => { if (resolvedIds.includes(c.id)) return { ...c, state: 'playing', triggerTime: Date.now() }; if (hasHardStop && !resolvedIds.includes(c.id) && c.state === 'playing') return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'completed' }; return c; }); }); } } 
                  else if (action === 'stop') stopCue(targetCue.id);
                  else if (action === 'pause') { const el = document.getElementById(`master-${targetCue.type === 'audio' ? 'aud' : (targetCue.type === 'video' ? 'vid' : '')}-${targetCue.id}`); if (el) el.pause(); } 
                  else if (action === 'resume') { const el = document.getElementById(`master-${targetCue.type === 'audio' ? 'aud' : (targetCue.type === 'video' ? 'vid' : '')}-${targetCue.id}`); if (el && targetCue.state === 'playing') el.play().catch(()=>{}); } 
@@ -1687,7 +2255,7 @@ export default function App() {
           let nextState = prev.map(cue => mutations[cue.id] ? { ...cue, ...mutations[cue.id] } : cue);
           if (nextCues.length > 0) {
             const hasHardStop = nextCues.some(c => c.triggerBehavior === 'stop-others');
-            if (hasHardStop) nextState = nextState.map(c => !nextCues.find(n => n.id === c.id) && c.state === 'playing' ? { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' } : c);
+            if (hasHardStop) nextState = nextState.map(c => !nextCues.find(n => n.id === c.id) && c.state === 'playing' ? { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'completed' } : c);
             nextState = nextState.map(c => nextCues.find(n => n.id === c.id) ? { ...c, state: 'playing', triggerTime: Date.now() } : c);
             setTimeout(() => { setSelectedCueIds(prevSelected => { if (prevSelected.length === 1 && prevSelected[0] === nextCueRaw.id) { const baseIds = nextCues.map(c => c.id); const lastTargetIndex = Math.max(...baseIds.map(id => prev.findIndex(c => c.id === id))); if (lastTargetIndex >= 0 && lastTargetIndex < prev.length - 1) { const pushedId = prev[lastTargetIndex + 1].id; setLastSelectedId(pushedId); scrollCueIntoView(pushedId); return [pushedId]; } } return prevSelected; }); }, 0);
           } return nextState;
@@ -1696,18 +2264,18 @@ export default function App() {
   }, [scrollCueIntoView, evaluateCue]);
 
   useEffect(() => {
-    const actionCues = cues.filter(c => (c.type === 'pause' || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'stop' || c.type === 'conditional') && c.state === 'playing');
+    const actionCues = cues.filter(c => (c.type === 'pause' || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'stop' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous')) && c.state === 'playing');
     if (actionCues.length > 0) {
       if (actionCues.some(c => c.type === 'pause')) setIsPaused(true);
       
       setCues(prev => {
         let nextState = [...prev];
-        nextState = nextState.map(c => ((c.type === 'pause' || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'stop' || c.type === 'conditional') && c.state === 'playing') ? { ...c, state: 'stopped' } : c);
+        nextState = nextState.map(c => ((c.type === 'pause' || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'stop' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous')) && c.state === 'playing') ? { ...c, state: 'completed' } : c);
         
         actionCues.filter(ac => ac.type === 'stop').forEach(sc => {
           const target = nextState.find(c => String(c.number) === String(sc.targetCueNumber));
           if (target && target.state === 'playing') {
-            nextState = nextState.map(c => c.id === target.id ? { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' } : c);
+            nextState = nextState.map(c => c.id === target.id ? { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'completed' } : c);
           }
         });
         return nextState;
@@ -1723,8 +2291,10 @@ export default function App() {
   const handleCueEnded = useCallback((endedCueId) => { 
     setCues(prev => { 
       const endedCue = prev.find(c => c.id === endedCueId); 
-      let nextState = prev.map(cue => cue.id === endedCueId ? { ...cue, state: 'stopped' } : cue); 
-      if (endedCue && endedCue.followAction === 'auto-follow' && (!endedCue.duration || endedCue.duration <= 0)) {
+      if (!endedCue || endedCue.state === 'completed' || endedCue.state === 'stopped') return prev;
+      
+      let nextState = prev.map(cue => cue.id === endedCueId ? { ...cue, state: 'completed' } : cue); 
+      if (endedCue.followAction === 'auto-follow' && (!endedCue.duration || endedCue.duration <= 0)) {
          setTimeout(() => triggerNextCueAfter(endedCueId), 0); 
       }
       return nextState; 
@@ -1740,6 +2310,83 @@ export default function App() {
     if (timeCues.length === 0) return;
     const interval = setInterval(() => { const now = new Date(); timeCues.forEach(cue => { if (!cue.scheduleTime) return; const target = new Date(); const [hours, minutes] = cue.scheduleTime.split(':'); target.setHours(parseInt(hours, 10) || 0, parseInt(minutes, 10) || 0, 0, 0); if (cue.scheduleDate) { const [year, month, day] = cue.scheduleDate.split('-'); target.setFullYear(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10)); } if (now >= target) handleCueEnded(cue.id); }); }, 500); return () => clearInterval(interval);
   }, [cues, handleCueEnded]);
+
+  // Automatically end Timer cues when they reach their duration
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentCues = cuesRef.current;
+      const timerCues = currentCues.filter(c => c.type === 'timer' && c.state === 'playing');
+      if (timerCues.length === 0) return;
+      const now = performance.now();
+      timerCues.forEach(cue => {
+        const tracker = fadeStateTrackers.current[cue.id];
+        if (tracker && tracker.state === 'playing') {
+          const elapsed = (now - tracker.start) / 1000;
+          if (elapsed >= (cue.timerDuration !== undefined ? Number(cue.timerDuration) : 60)) {
+            handleCueEnded(cue.id);
+          }
+        }
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [handleCueEnded]);
+
+  // Continuous Evaluation Loop for Active Listener Cues
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentCues = cuesRef.current;
+      const conditionalCues = currentCues.filter(c => c.type === 'conditional' && c.conditionRunMode === 'continuous' && c.state === 'playing');
+      if (conditionalCues.length === 0) return;
+
+      let firedSomething = false;
+      let resolvedCues = [];
+      let mutations = {};
+
+      conditionalCues.forEach(cue => {
+        let conditionMet = false;
+        if (cue.conditionType === 'osc-value') {
+          const val = oscValuesRef.current[cue.conditionOscPath];
+          if (val !== undefined && val !== null && String(val) === String(cue.conditionOscValue)) {
+            conditionMet = true;
+          }
+        } else {
+          const target = currentCues.find(c => String(c.number) === String(cue.conditionTargetCue));
+          if (target && target.state === (cue.conditionState || 'playing')) {
+            conditionMet = true;
+          }
+        }
+
+        if (conditionMet) {
+          firedSomething = true;
+          if (cue.conditionType === 'osc-value') oscValuesRef.current[cue.conditionOscPath] = null; // Consume the OSC response
+          mutations[cue.id] = { state: 'stopped' };
+          
+          if (cue.trueTargetCue) {
+            const targetCue = currentCues.find(c => String(c.number) === String(cue.trueTargetCue));
+            if (targetCue) resolvedCues.push(...evaluateCue(targetCue.id, currentCues));
+          }
+        }
+      });
+
+      if (firedSomething) {
+        setCues(prev => {
+          let nextState = prev.map(c => mutations[c.id] ? { ...c, ...mutations[c.id] } : c);
+          if (resolvedCues.length > 0) {
+            const hasHardStop = resolvedCues.some(c => c.triggerBehavior === 'stop-others');
+            const resolvedIds = resolvedCues.map(c => c.id);
+            nextState = nextState.map(c => {
+              if (resolvedIds.includes(c.id)) return { ...c, state: 'playing', triggerTime: Date.now() };
+              if (hasHardStop && !resolvedIds.includes(c.id) && c.state === 'playing') return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' };
+              return c;
+            });
+            setTimeout(() => { setSelectedCueIds([resolvedIds[0]]); setLastSelectedId(resolvedIds[0]); scrollCueIntoView(resolvedIds[0]); }, 0);
+          }
+          return nextState;
+        });
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [evaluateCue, scrollCueIntoView]);
 
   useEffect(() => {
     if (!isProjector) {
@@ -1774,10 +2421,12 @@ export default function App() {
           fadeStateTrackers.current[trackKey] = { state: 'playing', start: performance.now(), duration: cue.type === 'transition' ? (cue.duration || 0) : (cue.fadeInTime || 0), triggerTime: cue.triggerTime };
           if (cue.type === 'transition') {
               const mCanvas = masterCanvasRef.current;
+              const wCanvas = webrtcCanvasRef.current;
               if (mCanvas) { const snapCanvas = document.createElement('canvas'); snapCanvas.width = mCanvas.width || 1920; snapCanvas.height = mCanvas.height || 1080; snapCanvas.getContext('2d', { alpha: false }).drawImage(mCanvas, 0, 0); fadeStateTrackers.current[trackKey].snapshot = snapCanvas; }
+              if (wCanvas) { const snapCanvasW = document.createElement('canvas'); snapCanvasW.width = wCanvas.width || 1920; snapCanvasW.height = wCanvas.height || 1080; snapCanvasW.getContext('2d', { alpha: false }).drawImage(wCanvas, 0, 0); fadeStateTrackers.current[trackKey].snapshotWebRTC = snapCanvasW; }
               setTimeout(() => {
                   setCues(prev => {
-                      let nextState = prev.map(c => { if (c.id !== cue.id && ['video', 'audio', 'image', 'text', 'camera', 'timer'].includes(c.type) && (c.state === 'playing' || c.state === 'stopping')) { return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' }; } return c; });
+                      let nextState = prev.map(c => { if (c.id !== cue.id && ['video', 'audio', 'image', 'text', 'camera', 'timer'].includes(c.type) && (c.state === 'playing' || c.state === 'stopping')) { return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'completed' }; } return c; });
                       let targetCues = []; if (cue.targetCueNumber) { const target = nextState.find(c => String(c.number) === String(cue.targetCueNumber)); if (target) targetCues = evaluateCue(target.id, nextState); } else { const currentIndex = nextState.findIndex(c => c.id === cue.id); if (currentIndex >= 0 && currentIndex < nextState.length - 1) { targetCues = evaluateCue(nextState[currentIndex + 1].id, nextState); } }
                       if (targetCues.length > 0) { const resolvedIds = targetCues.map(tc => tc.id); nextState = nextState.map(c => resolvedIds.includes(c.id) ? { ...c, state: 'playing' } : c); setSelectedCueIds([resolvedIds[0]]); setLastSelectedId(resolvedIds[0]); scrollCueIntoView(resolvedIds[0]); } return nextState;
                   });
@@ -1807,9 +2456,9 @@ export default function App() {
       } else if (cue.state === 'stopping' && lastState !== 'stopping') {
           fadeStateTrackers.current[trackKey] = { state: 'stopping', start: performance.now(), duration: cue.fadeOutTime || 0 };
           if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','stop','conditional','timer'].includes(cue.type)) { if (cue.fadeOutTime > 0) { const currentBaseVol = masterVolumeRef.current > 0 ? el.volume / masterVolumeRef.current : (cue.volume !== undefined ? cue.volume : 1); doVolumeFade(el, currentBaseVol, 0, cue.fadeOutTime); } }
-          if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]); advanceTimers.current[`stop-${cue.id}`] = setTimeout(() => { setCues(prev => prev.map(c => c.id === cue.id ? { ...c, state: 'stopped' } : c)); }, (cue.fadeOutTime || 0) * 1000);
-      } else if (cue.state === 'stopped' && lastState !== 'stopped') {
-          fadeStateTrackers.current[trackKey] = { state: 'stopped', start: 0, duration: 0 }; if (fadeStateTrackers.current[trackKey].snapshot) delete fadeStateTrackers.current[trackKey].snapshot; if (advanceTimers.current[`stop-${cue.id}`]) { clearTimeout(advanceTimers.current[`stop-${cue.id}`]); delete advanceTimers.current[`stop-${cue.id}`]; } if (el && fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
+          if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]); advanceTimers.current[`stop-${cue.id}`] = setTimeout(() => { setCues(prev => prev.map(c => c.id === cue.id ? { ...c, state: 'completed' } : c)); }, (cue.fadeOutTime || 0) * 1000);
+      } else if ((cue.state === 'stopped' || cue.state === 'completed') && lastState !== 'stopped' && lastState !== 'completed') {
+          fadeStateTrackers.current[trackKey] = { state: cue.state, start: 0, duration: 0 }; if (fadeStateTrackers.current[trackKey].snapshot) delete fadeStateTrackers.current[trackKey].snapshot; if (fadeStateTrackers.current[trackKey].snapshotWebRTC) delete fadeStateTrackers.current[trackKey].snapshotWebRTC; if (advanceTimers.current[`stop-${cue.id}`]) { clearTimeout(advanceTimers.current[`stop-${cue.id}`]); delete advanceTimers.current[`stop-${cue.id}`]; } if (el && fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
           if (syncTimers.current[cue.id]) { clearTimeout(syncTimers.current[cue.id]); delete syncTimers.current[cue.id]; }
           if (el && ['video', 'audio'].includes(cue.type)) { el.pause(); el.currentTime = 0; }
       }
@@ -1818,37 +2467,114 @@ export default function App() {
   }, [cues, doVolumeFade, scrollCueIntoView, evaluateCue]);
 
   useEffect(() => {
+    if (!isProjector && !isReceiver && receiverConfig.enabled) {
+      try {
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.send('spawn-receiver', { displayId: receiverConfig.displayId, url: receiverConfig.url });
+      } catch(e) {}
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'r') {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          ipcRenderer.send('exit-receiver');
+        } catch(err){}
+        
+        if (isReceiver) {
+           window.location.hash = '';
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isReceiver]);
+
+  useEffect(() => {
+    if (!isProjector && !isReceiver) {
+      try {
+        const { ipcRenderer } = window.require('electron');
+        const onReceiverExited = () => {
+           setReceiverConfig(prev => ({...prev, enabled: false}));
+        };
+        ipcRenderer.on('receiver-mode-exited', onReceiverExited);
+        return () => ipcRenderer.removeListener('receiver-mode-exited', onReceiverExited);
+      } catch(e) {}
+    }
+  }, [isProjector, isReceiver]);
+
+  useEffect(() => {
     if (!masterCanvasRef.current) masterCanvasRef.current = document.createElement('canvas');
-    const masterCanvas = masterCanvasRef.current; const layerCanvas = document.createElement('canvas'); let animId;
+    if (!webrtcCanvasRef.current) webrtcCanvasRef.current = document.createElement('canvas');
+    const masterCanvas = masterCanvasRef.current; 
+    const webrtcCanvas = webrtcCanvasRef.current;
+    const layerCanvas = document.createElement('canvas'); 
+    const maskCanvas = document.createElement('canvas'); // Cached offscreen canvas for Masking
+    
+    const masterCtx = masterCanvas.getContext('2d', { alpha: false, desynchronized: true }); 
+    const layerCtx = layerCanvas.getContext('2d', { alpha: true });
+    const webrtcCtx = webrtcCanvas.getContext('2d', { alpha: false, desynchronized: true });
+    const maskCtx = maskCanvas.getContext('2d', { alpha: true });
+    
+    const quadCtxCache = {}; // Cache to prevent 60fps DOM querying
+    let animId;
+    
     const renderLoop = () => {
       if (stageSize.w === 0 || stageSize.h === 0) { animId = requestAnimationFrame(renderLoop); return; }
       if (masterCanvas.width !== stageSize.w) masterCanvas.width = Math.max(1, stageSize.w); if (masterCanvas.height !== stageSize.h) masterCanvas.height = Math.max(1, stageSize.h);
+      if (webrtcCanvas.width !== stageSize.w) webrtcCanvas.width = Math.max(1, stageSize.w); if (webrtcCanvas.height !== stageSize.h) webrtcCanvas.height = Math.max(1, stageSize.h);
       if (layerCanvas.width !== stageSize.w) layerCanvas.width = Math.max(1, stageSize.w); if (layerCanvas.height !== stageSize.h) layerCanvas.height = Math.max(1, stageSize.h);
 
-      const masterCtx = masterCanvas.getContext('2d', { alpha: false, desynchronized: true }); const layerCtx = layerCanvas.getContext('2d', { alpha: true });
       masterCtx.fillStyle = '#000000'; masterCtx.fillRect(0, 0, stageSize.w, stageSize.h);
+      
+      if (!isProjector) { webrtcCtx.fillStyle = '#000000'; webrtcCtx.fillRect(0, 0, stageSize.w, stageSize.h); }
+
       const currentCues = cuesRef.current.filter(c => c.state === 'playing' || c.state === 'stopping');
       
+      // --- NEW ANIMATE MODIFIER CALCULATION ---
+      const activeAnimates = currentCues.filter(c => c.type === 'animate' && c.state === 'playing');
+      const animModifiers = {};
+      activeAnimates.forEach(anim => {
+          const tracker = fadeStateTrackers.current[anim.id];
+          if (tracker && anim.duration > 0 && anim.animTargetCue) {
+              let p = (performance.now() - tracker.start) / (anim.duration * 1000);
+              p = Math.max(0, Math.min(1, p));
+              const currentVal = anim.animStartValue + (anim.animEndValue - anim.animStartValue) * p;
+              if (!animModifiers[anim.animTargetCue]) animModifiers[anim.animTargetCue] = {};
+              animModifiers[anim.animTargetCue][anim.animProperty] = currentVal;
+          }
+      });
+      // ----------------------------------------
+
       currentCues.forEach(cue => {
-        if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'stop', 'conditional'].includes(cue.type)) return;
-        if (isProjector && displayId !== 'all' && cue.targetDisplay && cue.targetDisplay !== 'all' && String(cue.targetDisplay) !== String(displayId)) return;
+        if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'stop', 'conditional', 'animate'].includes(cue.type)) return;
+        
+        const showOnMaster = !isProjector || (displayId === 'all') || (cue.targetDisplay === 'all' || String(cue.targetDisplay) === String(displayId));
+        const showOnWebRTC = !isProjector && (cue.targetDisplay === 'all' || cue.targetDisplay === 'webrtc');
+        if (!showOnMaster && !showOnWebRTC) return;
+
         let opacity = 1; const tracker = fadeStateTrackers.current[cue.id];
         if (tracker) { const elapsed = (performance.now() - tracker.start) / 1000; if (tracker.state === 'playing') opacity = tracker.duration > 0 ? Math.min(1, elapsed / tracker.duration) : 1; else if (tracker.state === 'stopping') opacity = tracker.duration > 0 ? Math.max(0, 1 - (elapsed / tracker.duration)) : 0; }
-        if (cue.type === 'blackout') { masterCtx.globalAlpha = opacity; masterCtx.fillStyle = 'black'; masterCtx.fillRect(0, 0, stageSize.w, stageSize.h); masterCtx.globalAlpha = 1; return; }
+        if (cue.type === 'blackout') { 
+            if (showOnMaster) { masterCtx.globalAlpha = opacity; masterCtx.fillStyle = 'black'; masterCtx.fillRect(0, 0, stageSize.w, stageSize.h); masterCtx.globalAlpha = 1; }
+            if (showOnWebRTC) { webrtcCtx.globalAlpha = opacity; webrtcCtx.fillStyle = 'black'; webrtcCtx.fillRect(0, 0, stageSize.w, stageSize.h); webrtcCtx.globalAlpha = 1; }
+            return; 
+        }
 
         let mediaEl = document.getElementById(`master-${cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : (cue.type === 'timer' ? 'timer' : (cue.type === 'camera' ? 'cam' : 'vid')))}-${cue.id}`);
         if (cue.chromaKeyEnabled) { const chromaEl = document.getElementById(`master-chroma-${cue.id}`); if (chromaEl) mediaEl = chromaEl; }
         if (!mediaEl) return; if (mediaEl instanceof HTMLVideoElement && mediaEl.readyState < 2) return; if (mediaEl instanceof HTMLImageElement && !mediaEl.complete) return;
         
-        const cueOpac = cue.customOpacity !== undefined ? cue.customOpacity : 1; 
-        masterCtx.globalAlpha = opacity * cueOpac;
+        const cueOpac = animModifiers[cue.number]?.customOpacity !== undefined ? animModifiers[cue.number].customOpacity : (cue.customOpacity !== undefined ? cue.customOpacity : 1); 
+        if (showOnMaster) masterCtx.globalAlpha = opacity * cueOpac;
+        if (showOnWebRTC) webrtcCtx.globalAlpha = opacity * cueOpac;
 
         // Apply HSB Color Correction
-        if (cue.colorFilterEnabled && ['video', 'image', 'camera'].includes(cue.type)) {
-            masterCtx.filter = `hue-rotate(${cue.hue || 0}deg) saturate(${cue.saturation ?? 100}%) brightness(${cue.brightness ?? 100}%)`;
-        } else {
-            masterCtx.filter = 'none';
-        }
+        const filterStr = (cue.colorFilterEnabled && ['video', 'image', 'camera'].includes(cue.type)) ? `hue-rotate(${cue.hue || 0}deg) saturate(${cue.saturation ?? 100}%) brightness(${cue.brightness ?? 100}%)` : 'none';
+        if (showOnMaster) masterCtx.filter = filterStr;
+        if (showOnWebRTC) webrtcCtx.filter = filterStr;
 
         // GEOMETRY & CROP LOGIC
         const srcW = mediaEl.videoWidth || mediaEl.naturalWidth || mediaEl.width || stageSize.w;
@@ -1857,8 +2583,10 @@ export default function App() {
         const sx = cL * srcW; const sy = cT * srcH; 
         const sw = Math.max(1, srcW - sx - (cR * srcW)); const sh = Math.max(1, srcH - sy - (cB * srcH));
 
-        const scX = (cue.scaleX ?? 100) / 100; const scY = (cue.scaleY ?? 100) / 100;
-        const pX = (cue.posX ?? 50) / 100; const pY = (cue.posY ?? 50) / 100;
+        const scX = (animModifiers[cue.number]?.scaleX !== undefined ? animModifiers[cue.number].scaleX : (cue.scaleX ?? 100)) / 100; 
+        const scY = (animModifiers[cue.number]?.scaleY !== undefined ? animModifiers[cue.number].scaleY : (cue.scaleY ?? 100)) / 100;
+        const pX = (animModifiers[cue.number]?.posX !== undefined ? animModifiers[cue.number].posX : (cue.posX ?? 50)) / 100; 
+        const pY = (animModifiers[cue.number]?.posY !== undefined ? animModifiers[cue.number].posY : (cue.posY ?? 50)) / 100;
         
         let baseDw = stageSize.w;
         let baseDh = stageSize.h;
@@ -1879,95 +2607,130 @@ export default function App() {
         const dx = (stageSize.w * pX) - (dw / 2); 
         const dy = (stageSize.h * pY) - (dh / 2);
 
-        const drawToMaster = (imageToDraw) => {
+        const drawToCtx = (ctx, imageToDraw) => {
             if (cue.warpEnabled && cue.warpPins) {
                 const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
-                masterCtx.save();
-                masterCtx.beginPath();
-                masterCtx.moveTo(pts[0].x, pts[0].y); masterCtx.lineTo(pts[1].x, pts[1].y); masterCtx.lineTo(pts[3].x, pts[3].y);
-                masterCtx.closePath(); masterCtx.clip();
-                applyCanvasAffine(masterCtx, dw, dh, pts[0], pts[1], pts[3], 1);
-                masterCtx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
-                masterCtx.restore();
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[3].x, pts[3].y);
+                ctx.closePath(); ctx.clip();
+                applyCanvasAffine(ctx, dw, dh, pts[0], pts[1], pts[3], 1);
+                ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
+                ctx.restore();
 
-                masterCtx.save();
-                masterCtx.beginPath();
-                masterCtx.moveTo(pts[1].x, pts[1].y); masterCtx.lineTo(pts[2].x, pts[2].y); masterCtx.lineTo(pts[3].x, pts[3].y);
-                masterCtx.closePath(); masterCtx.clip();
-                applyCanvasAffine(masterCtx, dw, dh, pts[1], pts[2], pts[3], 2);
-                masterCtx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
-                masterCtx.restore();
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y);
+                ctx.closePath(); ctx.clip();
+                applyCanvasAffine(ctx, dw, dh, pts[1], pts[2], pts[3], 2);
+                ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
+                ctx.restore();
             } else {
-                masterCtx.drawImage(imageToDraw, sx, sy, sw, sh, dx, dy, dw, dh);
+                ctx.drawImage(imageToDraw, sx, sy, sw, sh, dx, dy, dw, dh);
             }
             
-            masterCtx.filter = 'none'; // Ensure outline isn't color filtered
+            ctx.filter = 'none'; // Ensure outline isn't color filtered
 
             if (cue.outlineEnabled) {
-                masterCtx.save();
+                ctx.save();
                 if (cue.warpEnabled && cue.warpPins) {
                      const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
-                     masterCtx.beginPath();
-                     masterCtx.moveTo(pts[0].x, pts[0].y); masterCtx.lineTo(pts[1].x, pts[1].y); masterCtx.lineTo(pts[2].x, pts[2].y); masterCtx.lineTo(pts[3].x, pts[3].y); masterCtx.closePath();
+                     ctx.beginPath();
+                     ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); ctx.closePath();
                 } else {
-                     masterCtx.beginPath();
-                     masterCtx.rect(dx, dy, dw, dh);
+                     ctx.beginPath();
+                     ctx.rect(dx, dy, dw, dh);
                 }
-                masterCtx.strokeStyle = cue.outlineColor || '#ffffff';
-                masterCtx.lineWidth = cue.outlineWidth || 2;
-                masterCtx.stroke();
-                masterCtx.restore();
+                ctx.strokeStyle = cue.outlineColor || '#ffffff';
+                ctx.lineWidth = cue.outlineWidth || 2;
+                ctx.stroke();
+                ctx.restore();
             }
+        };
+
+        const drawWrapper = (imageToDraw) => {
+             if (showOnMaster) drawToCtx(masterCtx, imageToDraw);
+             if (showOnWebRTC) drawToCtx(webrtcCtx, imageToDraw);
         };
 
         try {
             if (cue.maskEnabled && cue.maskDataUrl) {
                const maskEl = document.getElementById(`master-mask-${cue.id}`);
                if (maskEl && maskEl.complete) { 
-                   const tempCanvas = document.createElement('canvas'); tempCanvas.width = sw; tempCanvas.height = sh; const tCtx = tempCanvas.getContext('2d');
-                   tCtx.drawImage(maskEl, sx, sy, sw, sh, 0, 0, sw, sh); tCtx.globalCompositeOperation = 'source-in'; tCtx.drawImage(mediaEl, sx, sy, sw, sh, 0, 0, sw, sh);
-                   drawToMaster(tempCanvas);
-               } else drawToMaster(mediaEl);
-            } else drawToMaster(mediaEl);
+                   if (maskCanvas.width !== sw) maskCanvas.width = Math.max(1, sw);
+                   if (maskCanvas.height !== sh) maskCanvas.height = Math.max(1, sh);
+                   maskCtx.globalCompositeOperation = 'source-over';
+                   maskCtx.clearRect(0, 0, sw, sh);
+                   maskCtx.drawImage(maskEl, sx, sy, sw, sh, 0, 0, sw, sh); 
+                   maskCtx.globalCompositeOperation = 'source-in'; 
+                   maskCtx.drawImage(mediaEl, sx, sy, sw, sh, 0, 0, sw, sh);
+                   drawWrapper(maskCanvas);
+               } else drawWrapper(mediaEl);
+            } else drawWrapper(mediaEl);
         } catch(err) { }
-        masterCtx.globalAlpha = 1;
-        masterCtx.filter = 'none'; // Cleanup for next cue
+        if (showOnMaster) { masterCtx.globalAlpha = 1; masterCtx.filter = 'none'; }
+        if (showOnWebRTC) { webrtcCtx.globalAlpha = 1; webrtcCtx.filter = 'none'; }
       });
 
+      const drawTransitionShapes = (ctx, W, H, p, maxR, tType) => {
+          switch(tType) {
+              case 'wipe-up': ctx.fillRect(0, H - H*p, W, H*p); break;
+              case 'wipe-down': ctx.fillRect(0, 0, W, H*p); break;
+              case 'iris-in': ctx.arc(W/2, H/2, maxR*p, 0, Math.PI*2); ctx.fill(); break;
+              case 'iris-out': ctx.globalCompositeOperation = 'destination-in'; ctx.arc(W/2, H/2, maxR*(1-p), 0, Math.PI*2); ctx.fill(); break;
+              case 'star-in': case 'star-out': const spikes = 5; const drawS = (outer, inner) => { let rot = Math.PI / 2 * 3; let cx = W/2, cy = H/2; let step = Math.PI / spikes; ctx.moveTo(cx, cy - outer); for(let i=0;i<spikes;i++){ ctx.lineTo(cx + Math.cos(rot)*outer, cy + Math.sin(rot)*outer); rot+=step; ctx.lineTo(cx + Math.cos(rot)*inner, cy + Math.sin(rot)*inner); rot+=step; } ctx.lineTo(cx, cy - outer); ctx.closePath(); }; if(tType==='star-in') { drawS(maxR*p, maxR*p*0.4); ctx.fill(); } else { ctx.globalCompositeOperation = 'destination-in'; drawS(maxR*(1-p), maxR*(1-p)*0.4); ctx.fill(); } break;
+              case 'curtain-in': ctx.fillRect(0, H/2 - (H/2)*p, W, H*p); break;
+              case 'curtain-out': ctx.globalCompositeOperation = 'destination-in'; ctx.fillRect(0, H/2 - (H/2)*(1-p), W, H*(1-p)); break;
+              case 'ripple-in': ctx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*p*1.5) - (i*maxR/4); if(r>0){ ctx.moveTo(W/2+r, H/2); ctx.arc(W/2,H/2,r,0,Math.PI*2); } } ctx.stroke(); break;
+              case 'ripple-out': ctx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*(1-p)*1.5) + (i*maxR/4); if(r<maxR*1.5){ ctx.moveTo(W/2+r, H/2); ctx.arc(W/2,H/2,r,0,Math.PI*2); } } ctx.stroke(); break;
+              case 'wind-left': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); ctx.fillRect(W - W*lp, y, W*lp, H/40 + 1); } break;
+              case 'wind-right': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); ctx.fillRect(0, y, W*lp, H/40 + 1); } break;
+          }
+      };
+
       currentCues.forEach(cue => {
-        if (cue.type === 'transition' && fadeStateTrackers.current[cue.id]?.snapshot) {
+        if (cue.type === 'transition' && (fadeStateTrackers.current[cue.id]?.snapshot || fadeStateTrackers.current[cue.id]?.snapshotWebRTC)) {
             const tracker = fadeStateTrackers.current[cue.id]; let p = 0; if (tracker.duration > 0) { p = Math.min(1, Math.max(0, (performance.now() - tracker.start) / (tracker.duration * 1000))); } else p = 1;
             if (p < 1) {
-                const snap = tracker.snapshot; const W = stageSize.w; const H = stageSize.h;
-                layerCtx.clearRect(0,0,W,H); layerCtx.globalCompositeOperation = 'source-over'; layerCtx.drawImage(snap, 0, 0, W, H); layerCtx.globalCompositeOperation = 'destination-out'; layerCtx.fillStyle = 'white'; layerCtx.beginPath();
+                const W = stageSize.w; const H = stageSize.h;
                 const maxR = Math.hypot(W, H) / 2; const tType = cue.transitionType || 'wipe-up';
-                switch(tType) {
-                    case 'wipe-up': layerCtx.fillRect(0, H - H*p, W, H*p); break;
-                    case 'wipe-down': layerCtx.fillRect(0, 0, W, H*p); break;
-                    case 'iris-in': layerCtx.arc(W/2, H/2, maxR*p, 0, Math.PI*2); layerCtx.fill(); break;
-                    case 'iris-out': layerCtx.globalCompositeOperation = 'destination-in'; layerCtx.arc(W/2, H/2, maxR*(1-p), 0, Math.PI*2); layerCtx.fill(); break;
-                    case 'star-in': case 'star-out': const spikes = 5; const drawS = (outer, inner) => { let rot = Math.PI / 2 * 3; let cx = W/2, cy = H/2; let step = Math.PI / spikes; layerCtx.moveTo(cx, cy - outer); for(let i=0;i<spikes;i++){ layerCtx.lineTo(cx + Math.cos(rot)*outer, cy + Math.sin(rot)*outer); rot+=step; layerCtx.lineTo(cx + Math.cos(rot)*inner, cy + Math.sin(rot)*inner); rot+=step; } layerCtx.lineTo(cx, cy - outer); layerCtx.closePath(); }; if(tType==='star-in') { drawS(maxR*p, maxR*p*0.4); layerCtx.fill(); } else { layerCtx.globalCompositeOperation = 'destination-in'; drawS(maxR*(1-p), maxR*(1-p)*0.4); layerCtx.fill(); } break;
-                    case 'curtain-in': layerCtx.fillRect(0, H/2 - (H/2)*p, W, H*p); break;
-                    case 'curtain-out': layerCtx.globalCompositeOperation = 'destination-in'; layerCtx.fillRect(0, H/2 - (H/2)*(1-p), W, H*(1-p)); break;
-                    case 'ripple-in': layerCtx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*p*1.5) - (i*maxR/4); if(r>0){ layerCtx.moveTo(W/2+r, H/2); layerCtx.arc(W/2,H/2,r,0,Math.PI*2); } } layerCtx.stroke(); break;
-                    case 'ripple-out': layerCtx.lineWidth = maxR/8; for(let i=0;i<8;i++) { let r = (maxR*(1-p)*1.5) + (i*maxR/4); if(r<maxR*1.5){ layerCtx.moveTo(W/2+r, H/2); layerCtx.arc(W/2,H/2,r,0,Math.PI*2); } } layerCtx.stroke(); break;
-                    case 'wind-left': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); layerCtx.fillRect(W - W*lp, y, W*lp, H/40 + 1); } break;
-                    case 'wind-right': for(let y=0; y<H; y+= H/40) { let delay = (Math.sin(y * 123.45) + 1)/2; let lp = Math.max(0, Math.min(1, (p - delay*0.3)*1.5)); layerCtx.fillRect(0, y, W*lp, H/40 + 1); } break;
+
+                if (tracker.snapshot) {
+                    layerCtx.clearRect(0,0,W,H); layerCtx.globalCompositeOperation = 'source-over'; layerCtx.drawImage(tracker.snapshot, 0, 0, W, H); layerCtx.globalCompositeOperation = 'destination-out'; layerCtx.fillStyle = 'white'; layerCtx.beginPath();
+                    drawTransitionShapes(layerCtx, W, H, p, maxR, tType);
+                    masterCtx.globalAlpha = 1; masterCtx.globalCompositeOperation = 'source-over'; masterCtx.drawImage(layerCanvas, 0, 0);
                 }
-                masterCtx.globalAlpha = 1; masterCtx.globalCompositeOperation = 'source-over'; masterCtx.drawImage(layerCanvas, 0, 0);
+                
+                if (tracker.snapshotWebRTC && !isProjector) {
+                    layerCtx.clearRect(0,0,W,H); layerCtx.globalCompositeOperation = 'source-over'; layerCtx.drawImage(tracker.snapshotWebRTC, 0, 0, W, H); layerCtx.globalCompositeOperation = 'destination-out'; layerCtx.fillStyle = 'white'; layerCtx.beginPath();
+                    drawTransitionShapes(layerCtx, W, H, p, maxR, tType);
+                    webrtcCtx.globalAlpha = 1; webrtcCtx.globalCompositeOperation = 'source-over'; webrtcCtx.drawImage(layerCanvas, 0, 0);
+                }
             }
         }
       });
 
       const viewPrefix = isProjector ? 'proj' : 'local'; const safeQuadW = Math.max(1, stageSize.w / gridSize.x); const safeQuadH = Math.max(1, stageSize.h / gridSize.y);
-      for (let y = 0; y < gridSize.y; y++) { for (let x = 0; x < gridSize.x; x++) { const qIdx = y * gridSize.x + x; [1, 2].forEach(tri => { const canvas = document.getElementById(`quad-ctx-${viewPrefix}-${qIdx}-${tri}`); if (canvas) { if (canvas.width !== safeQuadW) canvas.width = safeQuadW; if (canvas.height !== safeQuadH) canvas.height = safeQuadH; try { canvas.getContext('2d', { alpha: false }).clearRect(0, 0, safeQuadW, safeQuadH); canvas.getContext('2d', { alpha: false }).drawImage(masterCanvas, x * safeQuadW, y * safeQuadH, safeQuadW, safeQuadH, 0, 0, safeQuadW, safeQuadH); } catch(e) {} } }); } }
+      for (let y = 0; y < gridSize.y; y++) { for (let x = 0; x < gridSize.x; x++) { const qIdx = y * gridSize.x + x; [1, 2].forEach(tri => { 
+          const cacheKey = `${qIdx}-${tri}`;
+          let ctx = quadCtxCache[cacheKey];
+          if (!ctx || !ctx.canvas.isConnected) { 
+             const canvas = document.getElementById(`quad-ctx-${viewPrefix}-${qIdx}-${tri}`); 
+             if (canvas) { ctx = canvas.getContext('2d', { alpha: false }); quadCtxCache[cacheKey] = ctx; } else { quadCtxCache[cacheKey] = null; }
+          }
+          if (ctx) { 
+             if (ctx.canvas.width !== safeQuadW) ctx.canvas.width = safeQuadW; 
+             if (ctx.canvas.height !== safeQuadH) ctx.canvas.height = safeQuadH; 
+             try { ctx.drawImage(masterCanvas, x * safeQuadW, y * safeQuadH, safeQuadW, safeQuadH, 0, 0, safeQuadW, safeQuadH); } catch(e) {} 
+          } 
+      }); } }
       animId = requestAnimationFrame(renderLoop);
     };
     animId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animId);
   }, [stageSize, gridSize, isProjector, displayId]);
 
-  useEffect(() => { cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => { if (['image', 'goto', 'camera', 'blackout', 'pause', 'counter', 'stop', 'group', 'time', 'text', 'msc', 'osc', 'conditional', 'timer'].includes(cue.type)) return; const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`); if (el) { if (isPaused) el.pause(); else { const p = el.play(); if (p !== undefined) p.catch(()=>{}); } } }); }, [isPaused, cues]);
+  useEffect(() => { cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => { if (['image', 'goto', 'camera', 'blackout', 'pause', 'counter', 'stop', 'group', 'time', 'text', 'msc', 'osc', 'conditional', 'timer', 'animate'].includes(cue.type)) return; const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`); if (el) { if (isPaused) el.pause(); else { const p = el.play(); if (p !== undefined) p.catch(()=>{}); } } }); }, [isPaused, cues]);
   
   useEffect(() => { 
     if (isProjector) return; 
@@ -1983,9 +2746,9 @@ export default function App() {
   // =========================================================================
   // FILE SAVE, LOAD & PACK WORKSPACE
   // =========================================================================
-  const handleSaveShow = () => { const stateToSave = { cues: cues.map(c => ({ ...c, state: 'stopped' })), pins, gridSize, isPaused: false }; const blob = new Blob([JSON.stringify(stateToSave, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'show_workspace.TSW'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); setWorkspaceName('show_workspace.TSW'); };
+  const handleSaveShow = useCallback(() => { const stateToSave = { cues: cuesRef.current.map(c => ({ ...c, state: 'stopped' })), pins, gridSize, isPaused: false }; const blob = new Blob([JSON.stringify(stateToSave, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'show_workspace.TSW'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); setWorkspaceName('show_workspace.TSW'); }, [pins, gridSize]);
   
-  const applyLoadedState = (loadedState) => {
+  const applyLoadedState = useCallback((loadedState) => {
     let hydratedCues = loadedState.cues.map(c => {
       let migrated = { ...c };
       if (c.fadeTime !== undefined || c.autoAdvance !== undefined || c.endBehavior !== undefined) {
@@ -1996,11 +2759,11 @@ export default function App() {
           delete migrated.fadeTime; delete migrated.autoAdvance; delete migrated.advanceTime; delete migrated.endBehavior;
       }
       return {
-        ...migrated, groupId: migrated.groupId ?? null, groupMode: migrated.groupMode || 'fire-all', isExpanded: migrated.isExpanded ?? true, cameraLive: migrated.cameraLive ?? true, maskEnabled: migrated.maskEnabled ?? false, maskDataUrl: migrated.maskDataUrl ?? null, chromaKeyEnabled: migrated.chromaKeyEnabled ?? false, chromaKeyColor: migrated.chromaKeyColor || '#00ff00', chromaKeySimilarity: migrated.chromaKeySimilarity ?? 0.4, chromaKeySmoothness: migrated.chromaKeySmoothness ?? 0.1, counterLimit: migrated.counterLimit ?? 1, counterCurrent: migrated.counterCurrent ?? 0, gotoMode: migrated.gotoMode || 'specific', targetCueRangeMin: migrated.targetCueRangeMin || '', targetCueRangeMax: migrated.targetCueRangeMax || '', scheduleDate: migrated.scheduleDate || '', scheduleTime: migrated.scheduleTime || '', textContent: migrated.textContent || '', textColor: migrated.textColor || '#ffffff', textScale: migrated.textScale || 100, fontFamily: migrated.fontFamily || 'sans-serif', fontWeight: migrated.fontWeight || 'bold', fontStyle: migrated.fontStyle || 'normal', textAlign: migrated.textAlign || 'center', textX: migrated.textX ?? 50, textY: migrated.textY ?? 50, textShadowEnabled: migrated.textShadowEnabled ?? false, textShadowColor: migrated.textShadowColor || '#000000', textShadowBlur: migrated.textShadowBlur ?? 10, textShadowOffsetX: migrated.textShadowOffsetX ?? 5, textShadowOffsetY: migrated.textShadowOffsetY ?? 5, textSmoothing: migrated.textSmoothing ?? true, mscDevice: migrated.mscDevice ?? 0, mscCommand: migrated.mscCommand || 'GO', mscCue: migrated.mscCue || '1', oscIp: migrated.oscIp || '127.0.0.1', oscPort: migrated.oscPort ?? 8000, oscAddress: migrated.oscAddress || '/tuxshow/go', oscArgs: migrated.oscArgs || '', targetDisplay: migrated.targetDisplay || 'all', targetCueNumber: migrated.targetCueNumber || '',
+        ...migrated, description: migrated.description || '', groupId: migrated.groupId ?? null, groupMode: migrated.groupMode || 'fire-all', isExpanded: migrated.isExpanded ?? true, cameraLive: migrated.cameraLive ?? true, maskEnabled: migrated.maskEnabled ?? false, maskDataUrl: migrated.maskDataUrl ?? null, chromaKeyEnabled: migrated.chromaKeyEnabled ?? false, chromaKeyColor: migrated.chromaKeyColor || '#00ff00', chromaKeySimilarity: migrated.chromaKeySimilarity ?? 0.4, chromaKeySmoothness: migrated.chromaKeySmoothness ?? 0.1, counterLimit: migrated.counterLimit ?? 1, counterCurrent: migrated.counterCurrent ?? 0, gotoMode: migrated.gotoMode || 'specific', targetCueRangeMin: migrated.targetCueRangeMin || '', targetCueRangeMax: migrated.targetCueRangeMax || '', scheduleDate: migrated.scheduleDate || '', scheduleTime: migrated.scheduleTime || '', textContent: migrated.textContent || '', textColor: migrated.textColor || '#ffffff', textScale: migrated.textScale || 100, fontFamily: migrated.fontFamily || 'sans-serif', fontWeight: migrated.fontWeight || 'bold', fontStyle: migrated.fontStyle || 'normal', textAlign: migrated.textAlign || 'center', textX: migrated.textX ?? 50, textY: migrated.textY ?? 50, textShadowEnabled: migrated.textShadowEnabled ?? false, textShadowColor: migrated.textShadowColor || '#000000', textShadowBlur: migrated.textShadowBlur ?? 10, textShadowOffsetX: migrated.textShadowOffsetX ?? 5, textShadowOffsetY: migrated.textShadowOffsetY ?? 5, textSmoothing: migrated.textSmoothing ?? true, mscDevice: migrated.mscDevice ?? 0, mscCommand: migrated.mscCommand || 'GO', mscCue: migrated.mscCue || '1', oscIp: migrated.oscIp || '127.0.0.1', oscPort: migrated.oscPort ?? 8000, oscAddress: migrated.oscAddress || '/tuxshow/go', oscArgs: migrated.oscArgs || '', targetDisplay: migrated.targetDisplay || 'all', targetCueNumber: migrated.targetCueNumber || '',
         scaleX: migrated.scaleX ?? 100, scaleY: migrated.scaleY ?? 100, keepAspect: migrated.keepAspect ?? true, posX: migrated.posX ?? 50, posY: migrated.posY ?? 50, cropTop: migrated.cropTop ?? 0, cropBottom: migrated.cropBottom ?? 0, cropLeft: migrated.cropLeft ?? 0, cropRight: migrated.cropRight ?? 0, outlineEnabled: migrated.outlineEnabled ?? false, outlineColor: migrated.outlineColor || '#ffffff', outlineWidth: migrated.outlineWidth ?? 2, warpEnabled: migrated.warpEnabled ?? false, warpPins: migrated.warpPins || [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],
         mediaSyncOffset: migrated.mediaSyncOffset || 0, colorFilterEnabled: migrated.colorFilterEnabled ?? false, hue: migrated.hue || 0, saturation: migrated.saturation ?? 100, brightness: migrated.brightness ?? 100,
-        timerDuration: migrated.timerDuration || 60, timerStyle: migrated.timerStyle || 'countdown', timerFormat: migrated.timerFormat || 'MM:SS', timerVisible: migrated.timerVisible ?? true,
-        conditionType: migrated.conditionType || 'cue-state', conditionTargetCue: migrated.conditionTargetCue || '', conditionState: migrated.conditionState || 'playing', conditionOscPath: migrated.conditionOscPath || '/tuxshow/sensor', conditionOscValue: migrated.conditionOscValue || '1', trueTargetCue: migrated.trueTargetCue || '', falseTargetCue: migrated.falseTargetCue || ''
+        timerDuration: migrated.timerDuration || 60, timerStyle: migrated.timerStyle || 'countdown', timerFormat: migrated.timerFormat || 'MM:SS', timerVisible: migrated.timerVisible ?? true, customOpacity: migrated.customOpacity,
+        conditionRunMode: migrated.conditionRunMode || 'immediate', conditionType: migrated.conditionType || 'cue-state', conditionTargetCue: migrated.conditionTargetCue || '', conditionState: migrated.conditionState || 'playing', conditionOscPath: migrated.conditionOscPath || '/tuxshow/sensor', conditionOscValue: migrated.conditionOscValue || '1', trueTargetCue: migrated.trueTargetCue || '', falseTargetCue: migrated.falseTargetCue || ''
       };
     });
     setCues(hydratedCues);
@@ -2008,9 +2771,9 @@ export default function App() {
     if (loadedState.pins) setPins(loadedState.pins); 
     if (loadedState.gridSize) setGridSize(loadedState.gridSize); 
     setIsPaused(false);
-  };
+  }, []);
 
-  const handleLoadShow = (e) => { 
+  const handleLoadShow = useCallback((e) => { 
     const file = e.target.files[0]; if (!file) return; 
     setWorkspaceName(file.name);
     
@@ -2054,9 +2817,9 @@ export default function App() {
       } catch (err) { alert("Invalid .TSW file."); } 
     }; 
     reader.readAsText(file); e.target.value = ''; 
-  };
+  }, [applyLoadedState]);
   
-  const handlePackWorkspace = async () => {
+  const handlePackWorkspace = useCallback(async () => {
     if (!packPath) return;
     setIsPacking(true);
     setPackProgress('Initializing...');
@@ -2128,10 +2891,10 @@ export default function App() {
         setPackProgress(`Error: ${err.message}`);
         setIsPacking(false);
     }
-  };
+  }, [packPath, cues, pins, gridSize]);
 
-  const handleAddFolder = (e) => { if (!e.target.files) return; const files = Array.from(e.target.files); const validFiles = files.filter(file => { const name = file.name.toLowerCase(); return file.type.startsWith('audio/') || file.type.startsWith('video/') || file.type.startsWith('image/') || name.endsWith('.mp4') || name.endsWith('.webm') || name.endsWith('.ogg') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'); }); validFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })); const newCues = validFiles.map((file, idx) => { let type = 'video'; const name = file.name.toLowerCase(); if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg')) type = 'audio'; else if (file.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg')) type = 'image'; return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', followAction: 'none', fadeInTime: 1.0, fadeOutTime: 1.0, duration: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }; }); if (newCues.length > 0) { setCues(prev => { const startingNum = prev.length; const updatedNewCues = newCues.map((c, i) => ({ ...c, number: (startingNum + i + 1).toString() })); return [...prev, ...updatedNewCues]; }); } e.target.value = ''; };
-  const toggleProjectorWindow = () => { try { const { ipcRenderer } = window.require('electron'); if (projectorActive) { ipcRenderer.send('close-projector'); setProjectorActive(false); } else { ipcRenderer.send('spawn-projector', selectedDisplays); setProjectorActive(true); } } catch (e) { if (window.location.protocol === 'blob:' || window.location.hostname.includes('googleusercontent')) { window.location.hash = 'projector-all'; setIsProjector(true); setDisplayId('all'); setNeedsInit(true); if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{}); } else { if (projectorWinRef.current && !projectorWinRef.current.closed) { projectorWinRef.current.close(); projectorWinRef.current = null; setProjectorActive(false); } else { projectorWinRef.current = window.open(window.location.origin + window.location.pathname + '#projector-all', 'ProjectorOutput', 'width=1280,height=720'); setProjectorActive(true); const checkClose = setInterval(() => { if (projectorWinRef.current && projectorWinRef.current.closed) { setProjectorActive(false); clearInterval(checkClose); } }, 500); } } } };
+  const handleAddFolder = useCallback((e) => { if (!e.target.files) return; const files = Array.from(e.target.files); const validFiles = files.filter(file => { const name = file.name.toLowerCase(); return file.type.startsWith('audio/') || file.type.startsWith('video/') || file.type.startsWith('image/') || name.endsWith('.mp4') || name.endsWith('.webm') || name.endsWith('.ogg') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'); }); validFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })); const newCues = validFiles.map((file, idx) => { let type = 'video'; const name = file.name.toLowerCase(); if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg')) type = 'audio'; else if (file.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg')) type = 'image'; return { id: Date.now().toString() + '-' + idx, number: '', type, name: file.name, description: '', url: getNativeFilePath(file), state: 'stopped', loop: false, triggerBehavior: 'stop-others', followAction: 'none', fadeInTime: 1.0, fadeOutTime: 1.0, duration: 0, volume: 1, targetDisplay: 'all', groupId: null, cameraLive: true, scaleX: 100, scaleY: 100, keepAspect: true, posX: 50, posY: 50, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0, outlineEnabled: false, outlineColor: '#ffffff', outlineWidth: 2, warpEnabled: false, warpPins: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], mediaSyncOffset: 0, colorFilterEnabled: false, hue: 0, saturation: 100, brightness: 100 }; }); if (newCues.length > 0) { setCues(prev => { const startingNum = prev.length; const updatedNewCues = newCues.map((c, i) => ({ ...c, number: (startingNum + i + 1).toString() })); return [...prev, ...updatedNewCues]; }); } e.target.value = ''; }, []);
+  const toggleProjectorWindow = useCallback(() => { try { const { ipcRenderer } = window.require('electron'); if (projectorActive) { ipcRenderer.send('close-projector'); setProjectorActive(false); } else { ipcRenderer.send('spawn-projector', selectedDisplays); setProjectorActive(true); } } catch (e) { if (window.location.protocol === 'blob:' || window.location.hostname.includes('googleusercontent')) { window.location.hash = 'projector-all'; setIsProjector(true); setDisplayId('all'); setNeedsInit(true); if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{}); } else { if (projectorWinRef.current && !projectorWinRef.current.closed) { projectorWinRef.current.close(); projectorWinRef.current = null; setProjectorActive(false); } else { projectorWinRef.current = window.open(window.location.origin + window.location.pathname + '#projector-all', 'ProjectorOutput', 'width=1280,height=720'); setProjectorActive(true); const checkClose = setInterval(() => { if (projectorWinRef.current && projectorWinRef.current.closed) { setProjectorActive(false); clearInterval(checkClose); } }, 500); } } } }, [projectorActive, selectedDisplays]);
 
   // =========================================================================
   // FILE MIGRATOR UI CLOSE & CONFIRM BUTTONS
@@ -2150,7 +2913,7 @@ export default function App() {
   // =========================================================================
   // CORE TIMELINE AND RUNTIME STATE UPDATES
   // =========================================================================
-  const handleCueClick = (e, id) => {
+  const handleCueClick = useCallback((e, id) => {
     if (e.shiftKey && lastSelectedId) {
       const startIdx = cues.findIndex(c => c.id === lastSelectedId);
       const endIdx = cues.findIndex(c => c.id === id);
@@ -2165,7 +2928,7 @@ export default function App() {
       setSelectedCueIds([id]);
       setLastSelectedId(id);
     }
-  };
+  }, [cues, lastSelectedId, selectedCueIds]);
 
   const isVisible = useCallback((cueId) => {
     const cue = cues.find(c => c.id === cueId);
@@ -2181,14 +2944,33 @@ export default function App() {
     return getIndent(cue.groupId, depth + 1);
   }, [cues]);
 
-  const activeMediaCues = cues.filter(c => c.state === 'playing' || c.state === 'stopping');
-  const activeCues = cues.filter(c => selectedCueIds.includes(c.id));
-  const getSharedVal = (field, fallback = '') => { if (activeCues.length === 0) return fallback; const val = activeCues[0][field]; return val === undefined || val === null ? fallback : (activeCues.every(c => c[field] === val) ? val : fallback); };
-  const isMixed = (field) => { if (activeCues.length === 0) return false; const val = activeCues[0][field]; return !activeCues.every(c => c[field] === val); };
-  const updateSelectedCues = (field, value) => { setCues(prev => prev.map(c => { if (!selectedCueIds.includes(c.id)) return c; return { ...c, [field]: value }; })); };
+  const activeMediaCues = useMemo(() => cues.filter(c => c.state === 'playing' || c.state === 'stopping'), [cues]);
+  const activeCues = useMemo(() => cues.filter(c => selectedCueIds.includes(c.id)), [cues, selectedCueIds]);
+  const getSharedVal = useCallback((field, fallback = '') => { if (activeCues.length === 0) return fallback; const val = activeCues[0][field]; return val === undefined || val === null ? fallback : (activeCues.every(c => c[field] === val) ? val : fallback); }, [activeCues]);
+  const isMixed = useCallback((field) => { if (activeCues.length === 0) return false; const val = activeCues[0][field]; return !activeCues.every(c => c[field] === val); }, [activeCues]);
+  const updateSelectedCues = useCallback((field, value) => { setCues(prev => prev.map(c => { if (!selectedCueIds.includes(c.id)) return c; return { ...c, [field]: value }; })); }, [selectedCueIds]);
 
-  const handlePinDrag = (index, e) => { if (!stageRef.current) return; const rect = stageRef.current.getBoundingClientRect(); const newPins = [...pins]; newPins[index] = { x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) }; setPins(newPins); };
-  const handleResetPins = () => { const np = []; for (let iy = 0; iy <= gridSize.y; iy++) { for (let ix = 0; ix <= gridSize.x; ix++) { np.push({ x: ix / gridSize.x, y: iy / gridSize.y }); } } setPins(np); };
+  const activePlayheadCues = useMemo(() => cues.filter(c => c.state === 'playing'), [cues]);
+
+  useEffect(() => {
+    if (isProjector || isReceiver) return;
+
+    let statusPayload;
+    if (activePlayheadCues.length > 0) {
+      const latestCue = activePlayheadCues.reduce((latest, current) => (current.triggerTime || 0) > (latest.triggerTime || 0) ? current : latest);
+      statusPayload = { cueNumber: latestCue.number, cueName: latestCue.name };
+    } else {
+      statusPayload = { cueNumber: null, cueName: 'Idle' };
+    }
+
+    const statusString = JSON.stringify(statusPayload);
+    if (lastSentStatusRef.current !== statusString) {
+      try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('broadcast-status', statusPayload); lastSentStatusRef.current = statusString; } catch (e) {}
+    }
+  }, [activePlayheadCues, isProjector, isReceiver]);
+
+  const handlePinDrag = useCallback((index, e) => { if (!stageRef.current) return; const rect = stageRef.current.getBoundingClientRect(); const newPins = [...pins]; newPins[index] = { x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) }; setPins(newPins); }, [pins]);
+  const handleResetPins = useCallback(() => { const np = []; for (let iy = 0; iy <= gridSize.y; iy++) { for (let ix = 0; ix <= gridSize.x; ix++) { np.push({ x: ix / gridSize.x, y: iy / gridSize.y }); } } setPins(np); }, [gridSize]);
 
   const quadW = Math.max(1, stageSize.w / gridSize.x); const quadH = Math.max(1, stageSize.h / gridSize.y);
 
@@ -2225,7 +3007,7 @@ export default function App() {
               {cue.type === 'text' && <TextMasterPlayer cue={cue} />}
               {cue.type === 'timer' && <TimerMasterPlayer cue={cue} fadeStateTrackers={fadeStateTrackers} />}
               {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted crossOrigin="anonymous" onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline />}
-              {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
+              {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
               {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
               {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
               {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
@@ -2252,10 +3034,17 @@ export default function App() {
   // =========================================================================
   // RENDER: MAIN CONTROL INTERFACE
   // =========================================================================
+  if (isReceiver) {
+    return <DedicatedReceiver url={receiverUrl} />;
+  }
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-600 relative">
       <style>{` @keyframes meter { 0% { transform: scaleY(0.2); } 100% { transform: scaleY(1); } } `}</style>
 
+      <datalist id="url-history">
+        {urlHistory.map((h, i) => <option key={i} value={h} />)}
+      </datalist>
       <div className="hidden">
         {cues.map(cue => (
           <Fragment key={`media-group-${cue.id}`}>
@@ -2263,7 +3052,7 @@ export default function App() {
             {cue.type === 'text' && <TextMasterPlayer cue={cue} />}
             {cue.type === 'timer' && <TimerMasterPlayer cue={cue} fadeStateTrackers={fadeStateTrackers} />}
             {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted crossOrigin="anonymous" onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline />}
-            {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
+            {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={(e) => handleMediaTimeUpdate(cue.id, e.target)} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
             {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
             {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
             {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
@@ -2356,15 +3145,69 @@ export default function App() {
         </div>
       )}
 
+      {/* QR CODE MODAL */}
+      {showQrModal && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 p-6 rounded shadow-2xl max-w-4xl w-full">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2"><QrCode className="w-5 h-5 text-blue-500" /> Network PWA Links</h3>
+              <button onClick={() => setShowQrModal(false)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            {virtualDisplayConfig.enabled ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                 <div className="flex flex-col items-center bg-gray-950 p-4 rounded border border-gray-800">
+                   <LayoutGrid className="w-8 h-8 text-emerald-500 mb-3" />
+                   <h4 className="font-bold text-gray-200 mb-4 text-sm text-center">Stage Manager Deck</h4>
+                   <div className="bg-white p-2 rounded mb-4">
+                     <QRCodeSVG value={`https://${localIp}:${virtualDisplayConfig.port}/deck`} size={140} />
+                   </div>
+                   <span className="text-[10px] text-gray-500 font-mono text-center break-all">https://{localIp}:{virtualDisplayConfig.port}/deck</span>
+                 </div>
+                 <div className="flex flex-col items-center bg-gray-950 p-4 rounded border border-gray-800">
+                   <Gamepad2 className="w-8 h-8 text-yellow-500 mb-3" />
+                   <h4 className="font-bold text-gray-200 mb-4 text-sm text-center">Game Show Buzzer</h4>
+                   <div className="bg-white p-2 rounded mb-4">
+                     <QRCodeSVG value={`https://${localIp}:${virtualDisplayConfig.port}/buzzer`} size={140} />
+                   </div>
+                   <span className="text-[10px] text-gray-500 font-mono text-center break-all">https://{localIp}:{virtualDisplayConfig.port}/buzzer</span>
+                 </div>
+                 <div className="flex flex-col items-center bg-gray-950 p-4 rounded border border-gray-800">
+                   <Smartphone className="w-8 h-8 text-pink-500 mb-3" />
+                   <h4 className="font-bold text-gray-200 mb-4 text-sm text-center">Mobile Camera</h4>
+                   <div className="bg-white p-2 rounded mb-4">
+                     <QRCodeSVG value={`https://${localIp}:${virtualDisplayConfig.port}/camera`} size={140} />
+                   </div>
+                   <span className="text-[10px] text-gray-500 font-mono text-center break-all">https://{localIp}:{virtualDisplayConfig.port}/camera</span>
+                 </div>
+                 <div className="flex flex-col items-center bg-gray-950 p-4 rounded border border-gray-800">
+                   <MonitorPlay className="w-8 h-8 text-blue-500 mb-3" />
+                   <h4 className="font-bold text-gray-200 mb-4 text-sm text-center">WebRTC Viewer</h4>
+                   <div className="bg-white p-2 rounded mb-4">
+                     <QRCodeSVG value={`https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}`} size={140} />
+                   </div>
+                   <span className="text-[10px] text-gray-500 font-mono text-center break-all">https://{localIp}:{virtualDisplayConfig.port}{virtualDisplayConfig.path}</span>
+                 </div>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                 <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                 <p>Virtual HTTP Display is currently disabled.</p>
+                 <p className="text-sm mt-2">Enable it in System Settings to access the network PWAs.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showSettingsModal && (
         <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="bg-gray-900 border border-gray-700 p-6 rounded shadow-2xl max-w-2xl w-full">
-            <div className="flex justify-between items-center mb-6">
+          <div className="bg-gray-900 border border-gray-700 p-6 rounded shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-6 shrink-0">
               <h3 className="text-lg font-bold text-white flex items-center gap-2"><Settings className="w-5 h-5 text-blue-500" /> System Settings</h3>
               <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-2 gap-6 overflow-y-auto custom-scrollbar pr-2 flex-1">
               <div className="space-y-4">
                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1">Video Output Routing</h4>
                 <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
@@ -2378,10 +3221,10 @@ export default function App() {
                   )}
                 </div>
 
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Virtual HTTP Display</h4>
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Virtual WebRTC Output Stream</h4>
                 <div className="bg-gray-950 p-3 rounded border border-gray-800">
                   <label className="flex items-center gap-3 text-sm font-bold text-pink-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={virtualDisplayConfig.enabled} onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, enabled: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-pink-500 accent-pink-500 cursor-pointer" /> Enable Virtual Display
+                    <input type="checkbox" checked={virtualDisplayConfig.enabled} onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, enabled: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-pink-500 accent-pink-500 cursor-pointer" /> Enable WebRTC Output Stream
                   </label>
                   <div className="flex items-center gap-4 pl-7 mb-2">
                     <label className="text-xs text-gray-400">Port:</label>
@@ -2403,6 +3246,30 @@ export default function App() {
                       className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-pink-500" 
                       placeholder="/display1" 
                     />
+                  </div>
+                </div>
+
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Dedicated Receiver Mode</h4>
+                <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                  <label className="flex items-center gap-3 text-sm font-bold text-indigo-400 mb-2 cursor-pointer">
+                    <input type="checkbox" checked={receiverConfig.enabled} onChange={(e) => {
+                       const enabled = e.target.checked;
+                       setReceiverConfig(prev => ({...prev, enabled}));
+                       if (enabled) {
+                           try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('spawn-receiver', { displayId: receiverConfig.displayId, url: receiverConfig.url }); } catch(err) {}
+                       }
+                    }} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-indigo-500 accent-indigo-500 cursor-pointer" /> Enable Dedicated Receiver Mode
+                  </label>
+                  <div className="flex items-center gap-4 pl-7 mb-2">
+                    <label className="text-xs text-gray-400">Stream URL:</label>
+                    <input list="url-history" type="text" value={receiverConfig.url} onChange={(e) => setReceiverConfig(prev => ({...prev, url: e.target.value}))} onBlur={(e) => handleUrlBlur(e.target.value)} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500" placeholder="webrtc://192.168.0.191:8554/display1" />
+                  </div>
+                  <div className="flex items-center gap-4 pl-7">
+                    <label className="text-xs text-gray-400">Display:</label>
+                    <select value={receiverConfig.displayId} onChange={(e) => setReceiverConfig(prev => ({...prev, displayId: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500">
+                      <option value="primary">Primary Display</option>
+                      {hardwareDisplays.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -2427,10 +3294,52 @@ export default function App() {
                     <input type="text" value={ioConfig.mscDevice} disabled={!ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscDevice: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-purple-500" placeholder="e.g. 0 or 'Launchpad'" />
                   </div>
                 </div>
+
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Stream Deck Config</h4>
+                <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-3">
+                  <div className="max-h-60 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+                    {deckConfig.buttons.map((btn, idx) => (
+                      <div key={idx} className="bg-gray-900 border border-gray-700 p-2 rounded relative group">
+                         <button onClick={() => setDeckConfig(prev => ({ buttons: prev.buttons.filter((_, i) => i !== idx) }))} className="absolute top-2 right-2 text-gray-500 hover:text-red-500 hidden group-hover:block"><X className="w-3 h-3" /></button>
+                         <div className="grid grid-cols-2 gap-2 mb-2">
+                            <div>
+                              <label className="block text-[9px] text-gray-500 uppercase">Label</label>
+                              <input type="text" value={btn.label} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].label = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500" />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] text-gray-500 uppercase">OSC Path</label>
+                              <input type="text" value={btn.oscPath} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].oscPath = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
+                            </div>
+                         </div>
+                         <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[9px] text-gray-500 uppercase">OSC Args</label>
+                              <input type="text" value={btn.oscArgs || ''} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].oscArgs = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] text-gray-500 uppercase">Color</label>
+                              <div className="flex mt-0.5">
+                                 <input type="color" value={btn.color || '#1f2937'} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].color = e.target.value; return {buttons:n}; })} className="w-6 h-6 p-0 border-none bg-transparent cursor-pointer" />
+                                 <button onClick={() => setDeckConfig(prev => { const n = [...prev.buttons]; delete n[idx].color; return {buttons:n}; })} className="text-[9px] text-gray-500 ml-2 hover:text-gray-300">Clear</button>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-[9px] text-gray-500 uppercase">Icon</label>
+                              <select value={btn.icon || ''} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].icon = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500">
+                                 <option value="">None</option>
+                                 <option value="play">Play</option><option value="square">Square</option><option value="pause">Pause</option><option value="play-circle">Play Circle</option><option value="skip-back">Skip Back</option><option value="skip-forward">Skip Forward</option><option value="image">Image</option><option value="clock">Clock</option>
+                              </select>
+                            </div>
+                         </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => setDeckConfig(prev => ({ buttons: [...prev.buttons, { label: 'NEW', oscPath: '/tuxshow/go', oscArgs: '', color: '', icon: '' }] }))} className="w-full py-1.5 rounded border border-gray-700 hover:bg-gray-800 text-xs font-semibold text-gray-400 transition-colors flex items-center justify-center gap-1"><Plus className="w-3 h-3" /> Add Button</button>
+                </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-800">
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-800 shrink-0">
               <button onClick={() => setShowSettingsModal(false)} className="px-5 py-2 rounded bg-blue-600 text-white hover:bg-blue-500 text-sm font-bold shadow-lg transition-colors">Done</button>
             </div>
           </div>
@@ -2448,14 +3357,36 @@ export default function App() {
         setShowPackModal={setShowPackModal}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <CueList 
-          cues={cues} setCues={setCues} selectedCueIds={selectedCueIds} setSelectedCueIds={setSelectedCueIds} 
-          setLastSelectedId={setLastSelectedId} getNativeFilePath={getNativeFilePath} folderInputRef={folderInputRef} 
-          isVisible={isVisible} getIndent={getIndent} handleCueClick={handleCueClick} 
-          mediaTimes={mediaTimes} isPaused={isPaused} setIsPaused={setIsPaused} stopCue={stopCue} 
-          handleGo={handleGo} handleStopAll={handleStopAll} handleRenumberCues={handleRenumberCues}
-        />
+      <div className="flex flex-1 overflow-hidden relative">
+        <div className="absolute top-2 left-3 z-[60] flex bg-gray-950 border border-gray-700 rounded overflow-hidden shadow-lg">
+           <button onClick={() => setViewMode('list')} className={`px-3 py-1 text-[10px] font-bold uppercase transition-colors ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>List View</button>
+           <button onClick={() => setViewMode('timeline')} className={`px-3 py-1 text-[10px] font-bold uppercase transition-colors flex items-center gap-1 ${viewMode === 'timeline' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}><Clock className="w-3 h-3"/> Timeline</button>
+        </div>
+
+        {viewMode === 'list' ? (
+          <CueList 
+            cues={cues} setCues={setCues} selectedCueIds={selectedCueIds} setSelectedCueIds={setSelectedCueIds} 
+            setLastSelectedId={setLastSelectedId} getNativeFilePath={getNativeFilePath} folderInputRef={folderInputRef} 
+            isVisible={isVisible} getIndent={getIndent} handleCueClick={handleCueClick} 
+            mediaTimes={mediaTimes} isPaused={isPaused} setIsPaused={setIsPaused} stopCue={stopCue} 
+            handleGo={handleGo} handleStopAll={handleStopAll} handleRenumberCues={handleRenumberCues}
+          />
+        ) : (
+          <div className="w-1/3 flex flex-col min-w-[350px] border-r border-gray-800 bg-gray-950">
+             <TimelineView 
+               cues={cues} 
+               selectedCueIds={selectedCueIds} 
+               setSelectedCueIds={setSelectedCueIds}
+               setLastSelectedId={setLastSelectedId}
+               scrollCueIntoView={scrollCueIntoView}
+             />
+             <div className="p-4 bg-gray-950 border-t border-gray-800 flex gap-2 shrink-0">
+               <button onClick={handleGo} className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded shadow-lg shadow-green-900/20 active:scale-95 transition-transform flex items-center justify-center gap-2 text-xl tracking-widest"><Play className="w-6 h-6 fill-current" /> GO</button>
+               <button onClick={() => setIsPaused(!isPaused)} className={`px-5 font-bold rounded active:scale-95 transition-colors flex items-center justify-center gap-1 ${isPaused ? 'bg-yellow-600 hover:bg-yellow-500 text-white' : 'bg-gray-800 text-yellow-500'}`}><Pause className={`w-6 h-6 ${isPaused ? 'fill-current' : ''}`} /></button>
+               <button onClick={handleStopAll} className="px-5 bg-red-900 hover:bg-red-800 text-red-200 font-bold rounded active:scale-95 transition-transform flex flex-col items-center justify-center gap-1"><AlertCircle className="w-6 h-6" /></button>
+             </div>
+          </div>
+        )}
 
         <div className="w-2/3 flex flex-col bg-black overflow-hidden">
           <StagePreview 
@@ -2466,13 +3397,13 @@ export default function App() {
           <Inspector 
             cues={cues} setCues={setCues} selectedCueIds={selectedCueIds} activeCues={activeCues} 
             isMixed={isMixed} getSharedVal={getSharedVal} updateSelectedCues={updateSelectedCues} 
-            getNativeFilePath={getNativeFilePath} videoDevices={videoDevices} hardwareDisplays={hardwareDisplays}
-            setEditingMaskCueId={setEditingMaskCueId} setEditingWarpCueId={setEditingWarpCueId}
+            getNativeFilePath={getNativeFilePath} videoDevices={videoDevices} hardwareDisplays={hardwareDisplays} urlHistory={urlHistory}
+            setEditingMaskCueId={setEditingMaskCueId} setEditingWarpCueId={setEditingWarpCueId} handleUrlBlur={handleUrlBlur}
           />
         </div>
       </div>
 
-      <StatusBar localIp={localIp} virtualDisplayConfig={virtualDisplayConfig} ioConfig={ioConfig} />
+      <StatusBar localIp={localIp} virtualDisplayConfig={virtualDisplayConfig} ioConfig={ioConfig} setShowQrModal={setShowQrModal} />
     </div>
   );
 }

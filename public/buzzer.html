@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>TuxShow Buzzer</title>
+  <link rel="stylesheet" href="buzzer.css">
+  <link rel="manifest" href="manifest-buzzer.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+  <div id="player-setup" class="screen">
+    <h1>Select Your Player</h1>
+    <div class="player-grid">
+      <button class="player-btn" data-player="1" style="--player-color: #ef4444;">Player 1</button>
+      <button class="player-btn" data-player="2" style="--player-color: #3b82f6;">Player 2</button>
+      <button class="player-btn" data-player="3" style="--player-color: #10b981;">Player 3</button>
+      <button class="player-btn" data-player="4" style="--player-color: #f59e0b;">Player 4</button>
+    </div>
+  </div>
+  <div id="buzzer-screen" class="screen hidden">
+    <div id="status-bar">Player 1</div>
+    <button id="buzzer-btn">BUZZ</button>
+  </div>
+  <script src="buzzer.js"></script>
+</body>
+</html>

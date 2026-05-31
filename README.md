@@ -41,6 +41,3 @@ We love help from the community! Whether you are a professional developer, a the
 ### 📄 License
 
 This project is licensed under the GNU GPLv3 License — ensuring that TuxShow remains free and open for every student, forever.
-# TuxShow
-# TuxShow
-# TuxShow

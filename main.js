@@ -1,13 +1,21 @@
 import electronPkg from 'electron';
-const { app, BrowserWindow, screen, ipcMain } = electronPkg;
+const { app, BrowserWindow, screen, ipcMain, dialog, Menu } = electronPkg;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec, execSync, spawn } from 'child_process';
 import { createRequire } from 'module';
+import fsPromises from 'fs/promises';
 
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+let fixWebmDuration;
+try {
+  fixWebmDuration = require('webm-duration-fix');
+} catch (e) {
+  console.warn("[TuxShow] webm-duration-fix module not found. Run 'npm install webm-duration-fix'");
+}
 
 // =========================================================================
 // GPU AUTO-HEAL & COMPATIBILITY LAYER
@@ -37,6 +45,8 @@ let mainWindow;
 let splashWindow;
 let projectorWindows = [];
 let receiverWindow = null;
+let deckClients = [];
+let deckConfig = { buttons: [] };
 let lastKnownState = null;
 
 let oscServerInstance = null;
@@ -55,12 +65,17 @@ try {
   OSCServer = nodeOsc.Server;
 } catch (e) { console.warn("node-osc not installed"); }
 
+// Global reference for the recording stream
+let recordingStream = null;
+
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { x, y, width, height } = primaryDisplay.workArea;
 
+  const iconPath = app.isPackaged ? path.join(__dirname, 'dist', 'icon.png') : path.join(__dirname, 'public', 'icon.png');
+
   splashWindow = new BrowserWindow({
-    width: 600, height: 400, transparent: true, frame: false, alwaysOnTop: true, 
+    width: 600, height: 400, transparent: true, frame: false, alwaysOnTop: true, icon: iconPath,
     x: Math.round(x + (width - 600) / 2),
     y: Math.round(y + (height - 400) / 2),
     webPreferences: { nodeIntegration: false, contextIsolation: true }
@@ -70,10 +85,28 @@ function createWindow() {
   else splashWindow.loadFile(path.join(__dirname, 'public', 'splash.html'));
 
   mainWindow = new BrowserWindow({
-    width: 1280, height: 720, title: "TuxShow", show: false, 
+    width: 1280, height: 720, title: "TuxShow", show: false, icon: iconPath,
     x: Math.round(x + (width - 1280) / 2),
     y: Math.round(y + (height - 720) / 2),
     webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
+  });
+
+  // Native Context Menu for Text Fields (Zero React Overhead)
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    if (params.isEditable) {
+      const template = [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { type: 'separator' },
+        { role: 'selectAll' }
+      ];
+      const menu = Menu.buildFromTemplate(template);
+      menu.popup({ window: mainWindow });
+    }
   });
 
   if (app.isPackaged) {
@@ -116,6 +149,60 @@ function createWindow() {
         });
       } else resolve('HW-ACCEL ACTIVE');
     });
+  });
+
+  // --- RECORDING IPC HANDLERS ---
+  // 1. Handle the request to choose a save destination
+  ipcMain.handle('choose-record-destination', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save Show Recording',
+      defaultPath: 'TuxShow_Recording.webm',
+      filters: [{ name: 'WebM Video', extensions: ['webm'] }]
+    });
+    
+    if (canceled || !filePath) return null;
+    
+    // Initialize the write stream
+    recordingStream = fs.createWriteStream(filePath);
+    return filePath;
+  });
+
+  // 2. Handle incoming video chunks from the frontend
+  ipcMain.on('save-video-chunk', (event, arrayBuffer) => {
+    if (recordingStream) {
+      recordingStream.write(Buffer.from(arrayBuffer));
+    }
+  });
+
+  // 3. Handle stopping the recording and injecting metadata
+  ipcMain.on('stop-recording', (event, durationMs) => {
+    if (recordingStream) {
+      const finalPath = recordingStream.path;
+
+      // Close the stream safely
+      recordingStream.end(async () => {
+        recordingStream = null;
+        console.log(`[TuxShow] Recording stream closed. Injecting duration: ${durationMs}ms...`);
+
+        try {
+          // Read the completed file into a buffer
+          const fileBuffer = await fsPromises.readFile(finalPath);
+
+          if (fixWebmDuration) {
+            // Inject the missing EBML duration tag
+            const fixedBuffer = await fixWebmDuration(fileBuffer, durationMs);
+            // Overwrite the file with the corrected metadata
+            await fsPromises.writeFile(finalPath, fixedBuffer);
+            console.log('[TuxShow] WebM Metadata successfully injected!');
+          } else {
+            console.warn('[TuxShow] webm-duration-fix is not installed, skipping metadata injection.');
+          }
+        } catch (err) {
+          console.error('[TuxShow] Failed to inject WebM duration:', err);
+        }
+      });
+    }
   });
 
   // --- VIRTUAL HTTP DISPLAY ENGINE ---
@@ -163,6 +250,34 @@ function createWindow() {
         const manifest = { name: "TuxShow View", short_name: "TuxShow View", display: "standalone", background_color: "#000000", theme_color: "#000000", icons: [{ src: "/icon.png", sizes: "192x192 512x512", type: "image/png" }] };
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(manifest)); return;
       }
+      if (req.method === 'GET' && req.url === '/manifest-deck.json') {
+        const manifest = { name: "TuxShow Deck", short_name: "TuxShow Deck", start_url: "/deck", display: "standalone", background_color: "#111827", theme_color: "#111827", icons: [{ src: "/icon.png", sizes: "192x192 512x512", type: "image/png" }] };
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(manifest)); return;
+      }
+      if (req.method === 'GET' && req.url === '/manifest-buzzer.json') {
+        const manifest = { name: "TuxShow Buzzer", short_name: "TS Buzzer", start_url: "/buzzer", display: "standalone", background_color: "#111827", theme_color: "#111827", icons: [{ src: "/icon.png", sizes: "192x192 512x512", type: "image/png" }] };
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(manifest)); return;
+      }
+      if (req.method === 'GET' && req.url === '/manifest-cuelist.json') {
+        const manifest = { name: "TuxShow Script", short_name: "Script", display: "standalone", background_color: "#111827", theme_color: "#111827", icons: [{ src: "/icon.png", sizes: "192x192 512x512", type: "image/png" }] };
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(manifest)); return;
+      }
+      if (req.method === 'GET' && req.url === '/cuelist') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'cuelist.html') : path.join(__dirname, 'public', 'cuelist.html');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end('CueList UI not found.'); }
+          else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(content); }
+        });
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/cuelist.js') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'cuelist.js') : path.join(__dirname, 'public', 'cuelist.js');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end(); }
+          else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(content); }
+        });
+        return;
+      }
       if (req.method === 'GET' && req.url === '/icon.png') {
         const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'icon.png') : path.join(__dirname, 'public', 'icon.png');
         fs.readFile(filePath, (err, content) => {
@@ -186,6 +301,58 @@ function createWindow() {
         fs.readFile(filePath, (err, content) => {
           if (err) { res.writeHead(404); res.end(); }
           else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(content); }
+        });
+        return;
+      }
+
+      // Handle Deck PWA Static Files
+      if (req.method === 'GET' && req.url === '/deck') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'deck.html') : path.join(__dirname, 'public', 'deck.html');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end('Deck UI not found.'); }
+          else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(content); }
+        });
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/deck.js') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'deck.js') : path.join(__dirname, 'public', 'deck.js');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end(); }
+          else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(content); }
+        });
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/deck.css') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'deck.css') : path.join(__dirname, 'public', 'deck.css');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end(); }
+          else { res.writeHead(200, { 'Content-Type': 'text/css' }); res.end(content); }
+        });
+        return;
+      }
+      
+      // Handle Buzzer PWA Static Files
+      if (req.method === 'GET' && req.url.split('?')[0] === '/buzzer') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'buzzer.html') : path.join(__dirname, 'public', 'buzzer.html');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end('Buzzer UI not found.'); }
+          else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(content); }
+        });
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/buzzer.js') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'buzzer.js') : path.join(__dirname, 'public', 'buzzer.js');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end(); }
+          else { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(content); }
+        });
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/buzzer.css') {
+        const filePath = app.isPackaged ? path.join(__dirname, 'dist', 'buzzer.css') : path.join(__dirname, 'public', 'buzzer.css');
+        fs.readFile(filePath, (err, content) => {
+          if (err) { res.writeHead(404); res.end(); }
+          else { res.writeHead(200, { 'Content-Type': 'text/css' }); res.end(content); }
         });
         return;
       }
@@ -234,6 +401,53 @@ function createWindow() {
           } catch(e) {
             res.writeHead(400); res.end();
           }
+        });
+        return;
+      }
+
+      // Handle Deck API Routes
+      if (req.method === 'GET' && req.url === '/api/deck/config') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify(deckConfig));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/api/deck/command') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+          try {
+            const { path, args } = JSON.parse(body);
+            if (mainWindow && !mainWindow.isDestroyed() && path) {
+              mainWindow.webContents.send('osc-message', { path, args: args || [] });
+              res.writeHead(200);
+              res.end();
+            } else {
+              res.writeHead(500);
+              res.end();
+            }
+          } catch(e) {
+            res.writeHead(400);
+            res.end();
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/api/deck/stream') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        });
+        res.write('\n');
+
+        const clientId = Date.now();
+        const newClient = { id: clientId, res };
+        deckClients.push(newClient);
+
+        req.on('close', () => {
+          deckClients = deckClients.filter(client => client.id !== clientId);
         });
         return;
       }
@@ -316,7 +530,7 @@ function createWindow() {
       if (!display) return;
       const projWin = new BrowserWindow({
         x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height,
-        fullscreen: true, frame: false, backgroundColor: '#000000',
+        fullscreen: true, frame: false, backgroundColor: '#000000', icon: iconPath,
         webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false, backgroundThrottling: false }
       });
       if (app.isPackaged) projWin.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: `projector-${display.id}` });
@@ -351,7 +565,7 @@ function createWindow() {
     
     receiverWindow = new BrowserWindow({
       x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height,
-      fullscreen: true, frame: false, backgroundColor: '#000000', alwaysOnTop: true,
+      fullscreen: true, frame: false, backgroundColor: '#000000', alwaysOnTop: true, icon: iconPath,
       webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false, backgroundThrottling: false }
     });
     
@@ -385,6 +599,12 @@ function createWindow() {
     projectorWindows.forEach(win => { if (!win.isDestroyed()) win.webContents.send('sync-state', state); });
   });
 
+  ipcMain.on('request-state', (event) => {
+    if (lastKnownState) {
+      event.sender.send('sync-state', lastKnownState);
+    }
+  });
+
   ipcMain.on('update-io-config', (event, config) => {
     if (OSCServer) {
       if (config.oscInput && config.oscPort) {
@@ -411,6 +631,20 @@ function createWindow() {
   });
 
   ipcMain.on('send-msc', (event, { device, command, cueNumber }) => { console.log(`[MSC Broadcast Simulation] Device: ${device}, Command: ${command}, Cue: ${cueNumber}`); });
+
+  ipcMain.on('broadcast-status', (event, data) => {
+    const message = `data: ${JSON.stringify(data)}\n\n`;
+    deckClients.forEach(client => client.res.write(message));
+  });
+
+  ipcMain.on('broadcast-cuelist', (event, dietCues) => {
+    const message = `data: ${JSON.stringify({ type: 'cuelist', payload: dietCues })}\n\n`;
+    deckClients.forEach(client => client.res.write(message));
+  });
+
+  ipcMain.on('update-deck-config', (event, config) => {
+    deckConfig = config;
+  });
 }
 
 app.whenReady().then(createWindow);
@@ -420,5 +654,6 @@ app.on('window-all-closed', () => {
     Object.values(virtualClients).forEach(c => { try { c.destroy(); } catch(e){} });
     virtualHttpServer.close();
   }
+  deckClients.forEach(client => client.res.end());
   if (process.platform !== 'darwin') app.quit();
 });

@@ -1,7 +1,7 @@
 {
   "name": "tuxshow",
   "productName": "TuxShow",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Projection Mapping and Show Control",
   "author": "Christopher Baker <tuxshowscpm@gmail.com>",
   "homepage": "https://github.com/shakacb-lgtm/TuxShow",
@@ -17,8 +17,10 @@
     "easymidi": "^3.2.0",
     "lucide-react": "^0.368.0",
     "node-osc": "^9.1.7",
+    "qrcode.react": "^3.2.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "webm-duration-fix": "^1.0.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

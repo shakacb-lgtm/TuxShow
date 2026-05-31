@@ -1,8 +1,10 @@
 const videoPreview = document.getElementById('preview');
 const connectBtn = document.getElementById('connectBtn');
+const switchCamBtn = document.getElementById('switchCamBtn');
 const statusIndicator = document.getElementById('statusIndicator');
 const errorLog = document.getElementById('errorLog');
 
+let currentFacingMode = 'environment';
 let localStream = null;
 let peerConnection = null;
 
@@ -15,7 +17,7 @@ function logError(msg) {
 async function initCamera() {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
             audio: false // Prevents feedback loops in the theater
         });
         videoPreview.srcObject = localStream;
@@ -25,6 +27,32 @@ async function initCamera() {
         connectBtn.classList.add('opacity-50', 'cursor-not-allowed');
     }
 }
+
+switchCamBtn.addEventListener('click', async () => {
+    // Toggle between rear and front camera
+    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+    
+    // Stop old tracks to free up device hardware
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+    
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        });
+        
+        videoPreview.srcObject = localStream;
+        
+        // If actively streaming to TuxShow, swap the track seamlessly without dropping connection
+        if (peerConnection) {
+            const newVideoTrack = localStream.getVideoTracks()[0];
+            const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender && newVideoTrack) await sender.replaceTrack(newVideoTrack);
+        }
+    } catch (err) { logError(`Camera Switch Error: ${err.message}`); }
+});
 
 connectBtn.addEventListener('click', async () => {
     if (!localStream) return;

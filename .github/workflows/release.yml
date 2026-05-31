@@ -42,7 +42,9 @@ jobs:
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.deb
+          files: |
+            release/*.deb
+            docs/*.pdf
           generate_release_notes: true # Automatically creates bullet points of your code changes!
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
