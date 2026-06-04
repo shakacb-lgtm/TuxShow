@@ -1,0 +1,15 @@
+{
+    "name": "TuxShow Buzzer",
+    "short_name": "TS Buzzer",
+    "start_url": "/buzzer",
+    "display": "standalone",
+    "background_color": "#111827",
+    "theme_color": "#111827",
+    "icons": [
+      {
+        "src": "/icon.png",
+        "sizes": "192x192 512x512",
+        "type": "image/png"
+      }
+    ]
+}
