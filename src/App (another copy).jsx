@@ -18,8 +18,6 @@ import TimelineView from './TimelineView.jsx';
 import Inspector from './InspectorPanel.jsx';
 import StagePreview, { getAffineTransform, applyCanvasAffine } from './StagePreview.jsx';
 import CueList from './CueList.jsx';
-import { glslEngine } from './glslFilterEngine.js';
-import { SystemProfiler } from './systemProfiler.js';
 
 window.React = React;
 
@@ -382,89 +380,6 @@ const ChromaKeyFilter = React.memo(({ cue }) => {
   return <canvas id={`master-chroma-${cue.id}`} ref={canvasRef} className="hidden" />;
 });
 
-const CustomShaderFilter = React.memo(({ cue }) => {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-     const canvas = canvasRef.current;
-     if (!canvas) return;
-     const gl = canvas.getContext('webgl', { premultipliedAlpha: false, alpha: true });
-     if (!gl) return;
-
-     const compileShader = (type, source) => {
-       const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); 
-       if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
-       return s;
-     };
-
-     const vs = `attribute vec2 p; varying vec2 v; void main(){ gl_Position=vec4(p,0,1); v=vec2((p.x+1.0)/2.0, 1.0-(p.y+1.0)/2.0); }`;
-     let fs = '';
-
-     if (cue.shaderId === 'blur') {
-         fs = `precision mediump float; varying vec2 v; uniform sampler2D t; uniform vec2 res; uniform float r;
-         void main() {
-             vec4 c = vec4(0.0); vec2 off = r / res;
-             c += texture2D(t, v + vec2(-off.x, -off.y)) * 0.0625; c += texture2D(t, v + vec2(0.0, -off.y)) * 0.125; c += texture2D(t, v + vec2(off.x, -off.y)) * 0.0625;
-             c += texture2D(t, v + vec2(-off.x, 0.0)) * 0.125;    c += texture2D(t, v) * 0.25;                      c += texture2D(t, v + vec2(off.x, 0.0)) * 0.125;
-             c += texture2D(t, v + vec2(-off.x, off.y)) * 0.0625;  c += texture2D(t, v + vec2(0.0, off.y)) * 0.125;  c += texture2D(t, v + vec2(off.x, off.y)) * 0.0625;
-             gl_FragColor = c;
-         }`;
-     } else if (cue.shaderId === 'noise') {
-         fs = `precision mediump float; varying vec2 v; uniform sampler2D t; uniform float time; uniform float intensity;
-         float rand(vec2 co){ return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453); }
-         void main() {
-             vec4 c = texture2D(t, v); float noise = (rand(v * time) - 0.5) * intensity; gl_FragColor = vec4(c.rgb + noise, c.a);
-         }`;
-     } else if (cue.shaderId === 'edge') {
-         fs = `precision mediump float; varying vec2 v; uniform sampler2D t; uniform vec2 res;
-         void main() {
-             vec2 texel = 1.0 / res; float x = 0.0; float y = 0.0;
-             x += texture2D(t, v + vec2(-texel.x, -texel.y)).r * -1.0; x += texture2D(t, v + vec2(-texel.x,  0.0)).r * -2.0; x += texture2D(t, v + vec2(-texel.x,  texel.y)).r * -1.0;
-             x += texture2D(t, v + vec2( texel.x, -texel.y)).r * 1.0;  x += texture2D(t, v + vec2( texel.x,  0.0)).r * 2.0;  x += texture2D(t, v + vec2( texel.x,  texel.y)).r * 1.0;
-             y += texture2D(t, v + vec2(-texel.x, -texel.y)).r * -1.0; y += texture2D(t, v + vec2( 0.0,    -texel.y)).r * -2.0; y += texture2D(t, v + vec2( texel.x, -texel.y)).r * -1.0;
-             y += texture2D(t, v + vec2(-texel.x,  texel.y)).r * 1.0;  y += texture2D(t, v + vec2( 0.0,     texel.y)).r * 2.0;  y += texture2D(t, v + vec2( texel.x,  texel.y)).r * 1.0;
-             float edge = sqrt(x*x + y*y); gl_FragColor = vec4(vec3(edge), texture2D(t, v).a);
-         }`;
-     } else return;
-
-     const prog = gl.createProgram();
-     gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, vs));
-     gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, fs));
-     gl.linkProgram(prog); gl.useProgram(prog);
-
-     const pts = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
-     const buf = gl.createBuffer();
-     gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, pts, gl.STATIC_DRAW);
-     const pLoc = gl.getAttribLocation(prog, "p");
-     gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
-
-     const tex = gl.createTexture();
-     gl.bindTexture(gl.TEXTURE_2D, tex);
-     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-
-     let animId;
-     const render = () => {
-        const src = document.getElementById(`master-${cue.type === 'image' ? 'img' : (cue.type === 'camera' ? 'cam' : 'vid')}-${cue.id}`);
-        if (src && ((src.videoWidth && src.readyState >= 2) || src.complete)) {
-           const w = src.videoWidth || src.naturalWidth || 1920; const h = src.videoHeight || src.naturalHeight || 1080;
-           if (canvas.width !== w) canvas.width = w; if (canvas.height !== h) canvas.height = h;
-           gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(prog);
-           
-           if (cue.shaderId === 'blur') { gl.uniform2f(gl.getUniformLocation(prog, "res"), w, h); gl.uniform1f(gl.getUniformLocation(prog, "r"), cue.shaderBlurRadius !== undefined ? cue.shaderBlurRadius : 5.0); } 
-           else if (cue.shaderId === 'noise') { const speed = cue.shaderNoiseSpeed !== undefined ? cue.shaderNoiseSpeed : 1.0; const t = (performance.now() % 100000) / 1000.0 * speed; gl.uniform1f(gl.getUniformLocation(prog, "time"), t); gl.uniform1f(gl.getUniformLocation(prog, "intensity"), cue.shaderNoiseIntensity !== undefined ? cue.shaderNoiseIntensity : 0.5); } 
-           else if (cue.shaderId === 'edge') { gl.uniform2f(gl.getUniformLocation(prog, "res"), w, h); }
-
-           gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        }
-        animId = requestAnimationFrame(render);
-     };
-     render();
-     return () => { cancelAnimationFrame(animId); if (gl) { gl.deleteTexture(tex); gl.deleteBuffer(buf); gl.deleteProgram(prog); } };
-  }, [cue.id, cue.type, cue.shaderId, cue.shaderBlurRadius, cue.shaderNoiseIntensity, cue.shaderNoiseSpeed]);
-  return <canvas id={`master-customshader-${cue.id}`} ref={canvasRef} className="hidden" />;
-});
-
 const TextMasterPlayer = React.memo(({ cue }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -615,12 +530,13 @@ const Header = React.memo(function Header({
 
         <div className="flex items-center gap-1 border-l border-gray-800 pl-4 ml-2">
           <button onClick={() => setShowNewModal(true)} className="flex items-center gap-1.5 px-2.5 py-1 hover:bg-gray-800 rounded text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"><FilePlus className="w-3.5 h-3.5" /> New</button>
-          <button onClick={handleLoadShow} className="flex items-center gap-1.5 px-2.5 py-1 hover:bg-gray-800 rounded text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"><FolderOpen className="w-3.5 h-3.5" /> Load</button>
+          <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-2.5 py-1 hover:bg-gray-800 rounded text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"><FolderOpen className="w-3.5 h-3.5" /> Load</button>
           <button onClick={handleSaveShow} className="flex items-center gap-1.5 px-2.5 py-1 hover:bg-gray-800 rounded text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"><Save className="w-3.5 h-3.5" /> Save</button>
           <button onClick={() => setShowPackModal(true)} className="flex items-center gap-1.5 px-2.5 py-1 hover:bg-gray-800 rounded text-xs font-semibold text-gray-400 hover:text-blue-400 transition-colors"><Archive className="w-3.5 h-3.5" /> Pack</button>
           <div className="h-4 w-px bg-gray-800 mx-1"></div>
           <button onClick={handleUndo} title="Undo (Ctrl+Z)" className="p-1.5 hover:bg-gray-800 rounded text-gray-400 hover:text-gray-200 transition-colors"><Undo className="w-3.5 h-3.5" /></button>
           <button onClick={handleRedo} title="Redo (Ctrl+Shift+Z)" className="p-1.5 hover:bg-gray-800 rounded text-gray-400 hover:text-gray-200 transition-colors"><Redo className="w-3.5 h-3.5" /></button>
+          <input type="file" accept=".TSW" ref={fileInputRef} className="hidden" onChange={handleLoadShow} />
           <input type="file" webkitdirectory="true" directory="true" multiple ref={folderInputRef} className="hidden" onChange={handleAddFolder} />
         </div>
         
@@ -669,7 +585,7 @@ const Header = React.memo(function Header({
   );
 });
 
-const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig, ioConfig, setShowQrModal, masterVolumeUI, handleMasterVolumeSlider, performanceTier, syncMode }) {
+const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig, ioConfig, setShowQrModal, masterVolumeUI, handleMasterVolumeSlider }) {
   return (
     <div className="bg-gray-950 border-t border-gray-800 px-4 py-1.5 flex justify-between items-center text-[10px] font-mono tracking-widest text-gray-500 shrink-0 z-50">
       <div className="flex items-center gap-4">
@@ -685,33 +601,6 @@ const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig,
             <QrCode className="w-3 h-3" />
           </button>
         </span>
-        {performanceTier && (
-            <div 
-                title={
-                    performanceTier === 'high' ? "High Performance: All features enabled (60fps UI, WebGL Shaders, Animations, Visualizers)" :
-                    performanceTier === 'balanced' ? "Balanced Performance: Visualizers disabled, 30fps UI to conserve resources." :
-                    "Basic Performance: Shaders, Animations, and Visualizers disabled. UI limited to 15fps to protect show output."
-                }
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider border cursor-help ${
-                performanceTier === 'high' ? 'bg-green-900/30 text-green-400 border-green-800' :
-                performanceTier === 'balanced' ? 'bg-yellow-900/30 text-yellow-400 border-yellow-800' :
-                'bg-red-900/30 text-red-400 border-red-800'
-            }`}>
-                <Cpu className="w-3 h-3" />
-                <span>{performanceTier} TIER</span>
-            </div>
-        )}
-
-        {syncMode && syncMode !== 'standalone' && (
-            <div title={syncMode === 'master' ? "Broadcasting state to backups" : "Slaved to Master timeline"} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider border cursor-help ${
-                syncMode === 'master' ? 'bg-blue-900/30 text-blue-400 border-blue-800' :
-                'bg-orange-900/30 text-orange-400 border-orange-800'
-            }`}>
-                <Database className="w-3 h-3" />
-                <span>{syncMode}</span>
-            </div>
-        )}
-
         <span className={`flex items-center gap-1.5 ${virtualDisplayConfig.enabled ? 'text-pink-400/80' : 'text-gray-600'} truncate`} title={`Receiver: webrtc://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}\nBrowser: https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}\nCamera: https://${localIp}:${virtualDisplayConfig.port}/camera`}>
           <Cast className="w-3 h-3" /> STREAM: {virtualDisplayConfig.enabled ? `RECV: webrtc://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path} | WEB: https://${localIp}:${virtualDisplayConfig.port}${virtualDisplayConfig.path}` : 'OFF'}
         </span>
@@ -848,28 +737,6 @@ export default function App() {
     }
     return '';
   });
-
-  const [performanceTier, setPerformanceTier] = useState('high');
-  const [perfFlags, setPerfFlags] = useState({
-      disableVisualizers: false,
-      previewFps: 60,
-      disableCssAnimations: false,
-      disableShaders: false
-  });
-  const lastRenderTime = useRef(0);
-
-  useEffect(() => {
-      SystemProfiler.runDiagnostics().then(results => {
-          setPerformanceTier(results.recommendedTier);
-          if (results.recommendedTier === 'basic') {
-              setPerfFlags({ disableVisualizers: true, previewFps: 15, disableCssAnimations: true, disableShaders: true });
-          } else if (results.recommendedTier === 'balanced') {
-              setPerfFlags({ disableVisualizers: true, previewFps: 30, disableCssAnimations: false, disableShaders: false });
-          } else {
-              setPerfFlags({ disableVisualizers: false, previewFps: 60, disableCssAnimations: false, disableShaders: false });
-          }
-      });
-  }, []);
   
   const [cues, setCues] = useState([
     { id: '0', number: '1', type: 'group', name: 'Pre-Show Sequence', url: '', state: 'stopped', groupMode: 'fire-all', isExpanded: true, groupId: null, targetDisplay: 'all' },
@@ -938,51 +805,6 @@ export default function App() {
         const { type, payload } = e.data;
         if (type === 'ANIMATION_TICK') {
             animModifiersRef.current = payload;
-        } else if (type === 'SEQUENCE_TICK') {
-            const { resolvedChildren, mutations } = payload;
-            
-            // 1. Apply local worker mutations and inject synthetic media cues into the global state
-            setCues(prev => {
-                let nextCues = [...prev];
-                
-                if (Object.keys(mutations).length > 0) {
-                    nextCues = nextCues.map(c => mutations[c.id] ? { ...c, ...mutations[c.id] } : c);
-                }
-
-                if (resolvedChildren && resolvedChildren.length > 0) {
-                    const newMediaCues = resolvedChildren
-                        .filter(childCue => ['video', 'audio', 'image', 'text', 'camera'].includes(childCue.type))
-                        .map(childCue => ({ ...childCue, state: 'playing', isSynthetic: true })); // Tag as synthetic so UI ignores it, but stage plays it
-                    
-                    newMediaCues.forEach(newCue => {
-                        if (!nextCues.find(c => c.id === newCue.id)) {
-                            nextCues.push(newCue);
-                        }
-                    });
-                }
-                return nextCues;
-            });
-
-            // 2. Fire the hardware action cues instantly on the UI thread over IPC
-            if (resolvedChildren && resolvedChildren.length > 0) {
-                resolvedChildren.forEach(childCue => {
-                    if (['osc', 'projector', 'dmx'].includes(childCue.type)) {
-                        console.log(`[Hybrid Timeline] Firing synthetic hardware child:`, childCue.id);
-                        try {
-                            const { ipcRenderer } = window.require('electron');
-                            if (childCue.type === 'osc') {
-                                ipcRenderer.send('send-osc', { ip: childCue.oscIp, port: childCue.oscPort, address: childCue.oscPath, args: childCue.oscArgs });
-                            } else if (childCue.type === 'projector') {
-                                ipcRenderer.send('fire-projector-cue', { ip: childCue.projectorIp, port: childCue.projectorPort, protocol: childCue.projectorProtocol, payload: childCue.projectorPayload, password: childCue.projectorPassword });
-                            } else if (childCue.type === 'dmx') {
-                                ipcRenderer.send('fire-dmx-cue', { channel: childCue.dmxChannel, endValue: childCue.dmxEndValue, duration: childCue.duration });
-                            }
-                        } catch(e) {
-                            console.error("[Hybrid Timeline] IPC Error:", e);
-                        }
-                    }
-                });
-            }
         } else if (type === 'CUES_RESOLVED' || type === 'CONDITION_MET') {
             const { resolvedCues, mutations, source, consumedOscPaths, targetIds } = payload;
             
@@ -1001,7 +823,7 @@ export default function App() {
                 if (resolvedCues && resolvedCues.length > 0) {
                     const hasHardStop = resolvedCues.some(c => c.triggerBehavior === 'stop-others');
                     const resolvedIds = resolvedCues.map(c => c.id);
-                    
+
                     // NEW: Pre-load animation start values synchronously to prevent 1-frame visual pops
                     resolvedCues.forEach(rc => {
                         if (rc.type === 'animate' && rc.animTargetCue) {
@@ -1057,7 +879,24 @@ export default function App() {
     return () => workerRef.current?.terminate();
   }, [isProjector, isReceiver, scrollCueIntoView]);
 
-   useEffect(() => { localStorage.setItem('tuxshow_left_panel_width', leftPanelWidth); }, [leftPanelWidth]);
+  useEffect(() => {
+    if (workerRef.current && !isProjector && !isReceiver) {
+        const strippedCues = cues.map(c => ({ id: c.id, type: c.type, state: c.state, groupId: c.groupId, disabled: c.disabled, gotoMode: c.gotoMode, targetCueRangeMin: c.targetCueRangeMin, targetCueRangeMax: c.targetCueRangeMax, targetCueNumber: c.targetCueNumber, number: c.number, groupMode: c.groupMode, counterCurrent: c.counterCurrent, counterLimit: c.counterLimit, conditionRunMode: c.conditionRunMode, conditionType: c.conditionType, conditionOscPath: c.conditionOscPath, conditionOscValue: c.conditionOscValue, conditionTargetCue: c.conditionTargetCue, conditionState: c.conditionState, trueTargetCue: c.trueTargetCue, falseTargetCue: c.falseTargetCue, duration: c.duration, animTargetCue: c.animTargetCue, animProperty: c.animProperty, animStartValue: c.animStartValue, animEndValue: c.animEndValue, animPathEnabled: c.animPathEnabled, triggerBehavior: c.triggerBehavior, fadeTargetCue: c.fadeTargetCue }));
+        
+        // Strip non-serializable DOM elements (media, canvases) from the payload
+        const strippedTrackers = {};
+        for (const [key, value] of Object.entries(fadeStateTrackers.current)) {
+            strippedTrackers[key] = { start: value.start, animStart: value.animStart };
+        }
+
+        workerRef.current.postMessage({ 
+            action: 'SYNC_STATE', 
+            payload: { cues: strippedCues, oscValues: oscValuesRef.current, trackers: strippedTrackers, mainTime: performance.now() } 
+        });
+    }
+  }, [cues, isProjector, isReceiver]);
+
+  useEffect(() => { localStorage.setItem('tuxshow_left_panel_width', leftPanelWidth); }, [leftPanelWidth]);
 
   // =========================================================================
   // PLUGIN SCRIPT INJECTION & REACTIVITY
@@ -1294,61 +1133,6 @@ export default function App() {
   const [ioConfig, setIoConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_io_config'); return saved ? JSON.parse(saved) : { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } catch(e) { return { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } });
   const [virtualDisplayConfig, setVirtualDisplayConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_virtual_display'); return saved ? JSON.parse(saved) : { enabled: false, port: 8554, path: '/display1' }; } catch(e) { return { enabled: false, port: 8554, path: '/display1' }; } });
   const [receiverConfig, setReceiverConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_receiver_config'); return saved ? JSON.parse(saved) : { enabled: false, url: '', displayId: 'primary' }; } catch(e) { return { enabled: false, url: '', displayId: 'primary' }; } });
-  const [syncMode, setSyncMode] = useState(() => { 
-      try { return localStorage.getItem('tuxshow_sync_mode') || 'standalone'; } 
-      catch(e) { return 'standalone'; } 
-  });
-
-  useEffect(() => {
-      localStorage.setItem('tuxshow_sync_mode', syncMode);
-      try {
-          const { ipcRenderer } = window.require('electron');
-          ipcRenderer.invoke('set-sync-mode', { mode: syncMode, port: 53001 });
-      } catch (e) {}
-  }, [syncMode]);
-
-  // HOT-STANDBY BACKUP LISTENER
-  useEffect(() => {
-      if (syncMode !== 'backup') return;
-      
-      try {
-          const { ipcRenderer } = window.require('electron');
-          const handleNetworkSync = (event, payload) => {
-              // Lock out local execution while slaved
-              isExecutingRef.current = true; 
-              
-              if (payload.cues) setCues(payload.cues);
-              if (payload.pins) setPins(payload.pins);
-              if (payload.gridSize) setGridSize(payload.gridSize);
-              if (payload.isPaused !== undefined) setIsPaused(payload.isPaused);
-              if (payload.globalPause !== undefined) setGlobalPause(payload.globalPause);
-              
-              // Unlock local execution after a tiny delay
-              setTimeout(() => { isExecutingRef.current = false; }, 50);
-          };
-          
-          ipcRenderer.on('network-sync-receive', handleNetworkSync);
-          return () => ipcRenderer.removeListener('network-sync-receive', handleNetworkSync);
-      } catch (e) {}
-  }, [syncMode]);
-
-  // HOT-STANDBY PACK RECEIVER
-  useEffect(() => {
-      if (syncMode !== 'backup') return;
-      try {
-          const { ipcRenderer } = window.require('electron');
-          const handlePackReceived = (event, showData) => {
-              isExecutingRef.current = true;
-              if (showData.cues) setCues(showData.cues);
-              if (showData.pins) setPins(showData.pins);
-              if (showData.gridSize) setGridSize(showData.gridSize);
-              alert("New .TSPack received and loaded from Master!");
-              setTimeout(() => { isExecutingRef.current = false; }, 50);
-          };
-          ipcRenderer.on('network-pack-received', handlePackReceived);
-          return () => ipcRenderer.removeListener('network-pack-received', handlePackReceived);
-      } catch (e) {}
-  }, [syncMode]);
 
   const [deckConfig, setDeckConfig] = useState(() => { 
     try { 
@@ -1546,14 +1330,7 @@ export default function App() {
         ipcRenderer.on('projector-closed', () => setProjectorActive(false)); 
         ipcRenderer.on('update-projector-count', (event, count) => setProjectorActive(count > 0));
       } catch (e) { setGpuStatus("Browser Mode"); }
-      try {
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.invoke('get-local-ip')
-          .then(ip => setLocalIp(ip))
-          .catch(() => setLocalIp('127.0.0.1'));
-      } catch (e) {
-        setLocalIp('127.0.0.1');
-      }
+      try { const os = window.require('os'); const nets = os.networkInterfaces(); for (const name of Object.keys(nets)) { for (const net of nets[name]) { if (net.family === 'IPv4' && !net.internal) { setLocalIp(net.address); return; } } } } catch (e) {}
         if (navigator.mediaDevices) {
           navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => {
             s.getTracks().forEach(t => t.stop());
@@ -1614,13 +1391,13 @@ export default function App() {
 
     try {
       const { ipcRenderer } = window.require('electron');
-      ipcRenderer.send('start-virtual-display', { port: virtualDisplayConfig.port, path: virtualDisplayConfig.path, pin: virtualDisplayConfig.pin });
+      ipcRenderer.send('start-virtual-display', { port: virtualDisplayConfig.port, path: virtualDisplayConfig.path });
     } catch (e) {}
 
     return () => { 
       try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('stop-virtual-display'); } catch(e) {} 
     };
-  }, [virtualDisplayConfig.enabled, virtualDisplayConfig.port, virtualDisplayConfig.path, virtualDisplayConfig.pin, isProjector]);
+  }, [virtualDisplayConfig.enabled, virtualDisplayConfig.port, virtualDisplayConfig.path, isProjector]);
 
   useEffect(() => {
     const handleWebRTCOffer = async (event, { offerId, sdp }) => {
@@ -1694,18 +1471,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isProjector) { 
-        let resizeFrame;
-        const handleResize = () => {
-            if (resizeFrame) cancelAnimationFrame(resizeFrame);
-            resizeFrame = requestAnimationFrame(() => setStageSize({ w: window.innerWidth, h: window.innerHeight }));
-        };
-        handleResize(); 
-        window.addEventListener('resize', handleResize); 
-        return () => { window.removeEventListener('resize', handleResize); if (resizeFrame) cancelAnimationFrame(resizeFrame); }; 
-    } else { 
-        const observer = new ResizeObserver(entries => { if (entries[0] && entries[0].contentRect.width > 0 && entries[0].contentRect.height > 0) setStageSize({ w: entries[0].contentRect.width, h: entries[0].contentRect.height }); }); if (stageRef.current) observer.observe(stageRef.current); return () => observer.disconnect(); 
-    }
+    if (isProjector) { const handleResize = () => setStageSize({ w: window.innerWidth, h: window.innerHeight }); handleResize(); window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize); } 
+    else { const observer = new ResizeObserver(entries => { if (entries[0] && entries[0].contentRect.width > 0 && entries[0].contentRect.height > 0) setStageSize({ w: entries[0].contentRect.width, h: entries[0].contentRect.height }); }); if (stageRef.current) observer.observe(stageRef.current); return () => observer.disconnect(); }
   }, [isProjector]);
 
   useEffect(() => {
@@ -1735,18 +1502,7 @@ export default function App() {
            }
         }
       };
-      ipcRenderer.on('osc-message', handleOscMessage);
-      
-      const handleShaderRegistration = (event, { pluginId, shaderConfig }) => {
-          console.log(`[App] Received shader: ${shaderConfig.id} from ${pluginId}`);
-          glslEngine.updateShader(shaderConfig.id, shaderConfig.fragmentSource);
-      };
-      ipcRenderer.on('tuxshow:shader-registered', handleShaderRegistration);
-
-      return () => {
-          ipcRenderer.removeListener('osc-message', handleOscMessage);
-          ipcRenderer.removeListener('tuxshow:shader-registered', handleShaderRegistration);
-      };
+      ipcRenderer.on('osc-message', handleOscMessage); return () => ipcRenderer.removeListener('osc-message', handleOscMessage);
     } catch (e) {}
   }, [handleGo, handleStopAll, scrollCueIntoView, stopCue]);
 
@@ -1767,13 +1523,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const actionCues = cues.filter(c => ((c.type === 'pause' && (!c.duration || c.duration <= 0)) || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'projector' || c.type === 'stop' || c.type === 'state-changer' || c.type === 'select' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous') || (c.type === 'dmx' && (!c.duration || c.duration <= 0))) && c.state === 'playing');
+    const actionCues = cues.filter(c => ((c.type === 'pause' && (!c.duration || c.duration <= 0)) || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'stop' || c.type === 'state-changer' || c.type === 'select' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous')) && c.state === 'playing');
     if (actionCues.length > 0) {
       if (actionCues.some(c => c.type === 'pause')) setIsPaused(true);
       
       setCues(prev => {
         let nextState = [...prev];
-        nextState = nextState.map(c => (((c.type === 'pause' && (!c.duration || c.duration <= 0)) || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'projector' || c.type === 'stop' || c.type === 'state-changer' || c.type === 'select' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous') || (c.type === 'dmx' && (!c.duration || c.duration <= 0))) && c.state === 'playing') ? { ...c, state: 'completed' } : c);
+        nextState = nextState.map(c => (((c.type === 'pause' && (!c.duration || c.duration <= 0)) || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'stop' || c.type === 'state-changer' || c.type === 'select' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous')) && c.state === 'playing') ? { ...c, state: 'completed' } : c);
         
         actionCues.filter(ac => ac.type === 'stop').forEach(sc => {
           const target = nextState.find(c => String(c.number) === String(sc.targetCueNumber).trim());
@@ -1841,12 +1597,6 @@ export default function App() {
 
       actionCues.forEach(ac => {
         if (ac.type === 'msc' || ac.type === 'osc') { try { const { ipcRenderer } = window.require('electron'); if (ac.type === 'msc') ipcRenderer.send('send-msc', { device: ac.mscDevice, command: ac.mscCommand, cueNumber: ac.mscCue }); if (ac.type === 'osc') ipcRenderer.send('send-osc', { ip: ac.oscIp, port: ac.oscPort, address: ac.oscAddress, args: ac.oscArgs }); } catch (e) {} }
-        if (ac.type === 'projector') { 
-            try { 
-                const { ipcRenderer } = window.require('electron'); 
-                ipcRenderer.send('fire-projector-cue', { ip: ac.projectorIp, port: ac.projectorPort, protocol: ac.projectorProtocol, payload: ac.projectorPayload }); 
-            } catch (e) {} 
-        }
         if (ac.followAction === 'auto-follow' && (!ac.duration || ac.duration <= 0)) setTimeout(() => triggerNextCueAfter(ac.id), 0); 
       });
     }
@@ -1951,12 +1701,6 @@ export default function App() {
 
       if (isNewTrigger) {
           if (cue.type === 'pause') setIsPaused(true);
-          if (cue.type === 'dmx') {
-              try {
-                  const { ipcRenderer } = window.require('electron');
-                  ipcRenderer.send('fire-dmx-cue', { channel: cue.dmxChannel, endValue: cue.dmxEndValue, duration: cue.duration });
-              } catch (e) {}
-          }
           if (syncTimers.current[cue.id]) clearTimeout(syncTimers.current[cue.id]);
           if (el && fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
 
@@ -1980,7 +1724,7 @@ export default function App() {
                   }
                   if (targetId) workerRef.current?.postMessage({ action: 'EVALUATE_GO', payload: { targetIds: [targetId], source: 'transition' } });
               }, 0);
-          } else if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx'].includes(cue.type)) {
+          } else if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','stop','conditional','timer'].includes(cue.type)) {
               if (isProjector) {
                   el.muted = true;
               } else {
@@ -2009,7 +1753,7 @@ export default function App() {
           }
       } else if (cue.state === 'stopping' && lastState !== 'stopping') {
       fadeStateTrackers.current[trackKey] = { state: 'stopping', start: performance.now(), animStart: fadeStateTrackers.current[trackKey]?.animStart || performance.now(), duration: cue.fadeOutTime || 0 };
-          if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx'].includes(cue.type)) { if (cue.fadeOutTime > 0) { const currentBaseVol = masterVolumeRef.current > 0 ? el.volume / masterVolumeRef.current : (cue.volume !== undefined ? cue.volume : 1); doVolumeFade(el, currentBaseVol, 0, cue.fadeOutTime); } }
+          if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','stop','conditional','timer'].includes(cue.type)) { if (cue.fadeOutTime > 0) { const currentBaseVol = masterVolumeRef.current > 0 ? el.volume / masterVolumeRef.current : (cue.volume !== undefined ? cue.volume : 1); doVolumeFade(el, currentBaseVol, 0, cue.fadeOutTime); } }
           if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]); advanceTimers.current[`stop-${cue.id}`] = setTimeout(() => { setCues(prev => prev.map(c => c.id === cue.id ? { ...c, state: 'stopped' } : c)); }, (cue.fadeOutTime || 0) * 1000);
       } else if ((cue.state === 'stopped' || cue.state === 'completed') && lastState !== 'stopped' && lastState !== 'completed') {
           fadeStateTrackers.current[trackKey] = { state: cue.state, start: 0, duration: 0, fromStopping: lastState === 'stopping' }; if (fadeStateTrackers.current[trackKey].snapshot) delete fadeStateTrackers.current[trackKey].snapshot; if (fadeStateTrackers.current[trackKey].snapshotWebRTC) delete fadeStateTrackers.current[trackKey].snapshotWebRTC; if (advanceTimers.current[`stop-${cue.id}`]) { clearTimeout(advanceTimers.current[`stop-${cue.id}`]); delete advanceTimers.current[`stop-${cue.id}`]; } if (el && fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
@@ -2022,26 +1766,9 @@ export default function App() {
               }
           }
       }
-      if (cue.state === 'playing' && lastState === 'playing' && el && !fadeIntervals.current[el.id] && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx'].includes(cue.type)) { el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current; }
+      if (cue.state === 'playing' && lastState === 'playing' && el && !fadeIntervals.current[el.id] && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','stop','conditional','timer'].includes(cue.type)) { el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current; }
     });
   }, [cues, doVolumeFade, scrollCueIntoView]);
-
-  useEffect(() => {
-    if (workerRef.current && !isProjector && !isReceiver) {
-        const strippedCues = cues.map(c => ({ id: c.id, type: c.type, state: c.state, groupId: c.groupId, disabled: c.disabled, gotoMode: c.gotoMode, targetCueRangeMin: c.targetCueRangeMin, targetCueRangeMax: c.targetCueRangeMax, targetCueNumber: c.targetCueNumber, number: c.number, groupMode: c.groupMode, counterCurrent: c.counterCurrent, counterLimit: c.counterLimit, conditionRunMode: c.conditionRunMode, conditionType: c.conditionType, conditionOscPath: c.conditionOscPath, conditionOscValue: c.conditionOscValue, conditionTargetCue: c.conditionTargetCue, conditionState: c.conditionState, trueTargetCue: c.trueTargetCue, falseTargetCue: c.falseTargetCue, duration: c.duration, animTargetCue: c.animTargetCue, animProperty: c.animProperty, animStartValue: c.animStartValue, animEndValue: c.animEndValue, animPathEnabled: c.animPathEnabled, triggerBehavior: c.triggerBehavior, fadeTargetCue: c.fadeTargetCue }));
-        
-        // Strip non-serializable DOM elements (media, canvases) from the payload
-        const strippedTrackers = {};
-        for (const [key, value] of Object.entries(fadeStateTrackers.current)) {
-            strippedTrackers[key] = { start: value.start, animStart: value.animStart };
-        }
-
-        workerRef.current.postMessage({ 
-            action: 'SYNC_STATE', 
-            payload: { cues: strippedCues, oscValues: oscValuesRef.current, trackers: strippedTrackers, mainTime: performance.now() } 
-        });
-    }
-  }, [cues, isProjector, isReceiver]);
 
   useEffect(() => {
     if (!isProjector && !isReceiver && receiverConfig.enabled) {
@@ -2122,14 +1849,6 @@ export default function App() {
     let animId;
     
     const renderLoop = () => {
-      const now = performance.now();
-      // Throttle the UI preview frame rate to save CPU (60fps, 30fps, or 15fps)
-      if (now - lastRenderTime.current < (1000 / perfFlags.previewFps)) {
-          animId = requestAnimationFrame(renderLoop);
-          return;
-      }
-      lastRenderTime.current = now;
-
       if (stageSize.w === 0 || stageSize.h === 0) { animId = requestAnimationFrame(renderLoop); return; }
       if (masterCanvas.width !== stageSize.w) masterCanvas.width = Math.max(1, stageSize.w); if (masterCanvas.height !== stageSize.h) masterCanvas.height = Math.max(1, stageSize.h);
       if (webrtcCanvas.width !== stageSize.w) webrtcCanvas.width = Math.max(1, stageSize.w); if (webrtcCanvas.height !== stageSize.h) webrtcCanvas.height = Math.max(1, stageSize.h);
@@ -2144,10 +1863,9 @@ export default function App() {
       // --- OPTIMIZED ANIMATE MODIFIER CALCULATION ---
       const animModifiers = JSON.parse(JSON.stringify(animModifiersRef.current || {}));
       
-      const allCues = cuesRef.current;
-      for (let i = 0; i < allCues.length; i++) {
-          const anim = allCues[i];
-          if (anim.type === 'animate' && (anim.state === 'playing' || anim.state === 'completed') && anim.animTargetCue) {
+      for (let i = 0; i < currentCues.length; i++) {
+          const anim = currentCues[i];
+          if (anim.type === 'animate' && anim.animPathEnabled && anim.animPathSvg && anim.animTargetCue) {
               const tracker = fadeStateTrackers.current[anim.id];
               if (tracker && anim.duration > 0) {
                   let p = (performance.now() - (tracker.animStart || tracker.start)) / (anim.duration * 1000);
@@ -2155,24 +1873,17 @@ export default function App() {
                   
                   if (!animModifiers[anim.animTargetCue]) animModifiers[anim.animTargetCue] = {};
                   
-                  if (anim.animPathEnabled && anim.animPathSvg) {
-                      if (!window.__animPaths) window.__animPaths = {};
-                      if (!window.__animPaths[anim.id] || window.__animPaths[anim.id].raw !== anim.animPathSvg) {
-                          const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                          pathEl.setAttribute("d", anim.animPathSvg);
-                          window.__animPaths[anim.id] = { raw: anim.animPathSvg, el: pathEl, len: pathEl.getTotalLength() };
-                      }
-                      const pathData = window.__animPaths[anim.id];
-                      if (pathData.len > 0) {
-                          const pt = pathData.el.getPointAtLength(p * pathData.len);
-                          animModifiers[anim.animTargetCue]['posX'] = pt.x;
-                          animModifiers[anim.animTargetCue]['posY'] = pt.y;
-                      }
-                  } else {
-                      const startVal = anim.animStartValue !== undefined ? anim.animStartValue : 0;
-                      const endVal = anim.animEndValue !== undefined ? anim.animEndValue : 100;
-                      const currentVal = startVal + (endVal - startVal) * p;
-                      animModifiers[anim.animTargetCue][anim.animProperty || 'posX'] = currentVal;
+                  if (!window.__animPaths) window.__animPaths = {};
+                  if (!window.__animPaths[anim.id] || window.__animPaths[anim.id].raw !== anim.animPathSvg) {
+                      const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                      pathEl.setAttribute("d", anim.animPathSvg);
+                      window.__animPaths[anim.id] = { raw: anim.animPathSvg, el: pathEl, len: pathEl.getTotalLength() };
+                  }
+                  const pathData = window.__animPaths[anim.id];
+                  if (pathData.len > 0) {
+                      const pt = pathData.el.getPointAtLength(p * pathData.len);
+                      animModifiers[anim.animTargetCue]['posX'] = pt.x;
+                      animModifiers[anim.animTargetCue]['posY'] = pt.y;
                   }
               }
           }
@@ -2180,7 +1891,7 @@ export default function App() {
       // ----------------------------------------
 
       currentCues.forEach(cue => {
-        if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'projector', 'stop', 'conditional', 'animate', 'state-changer', 'select', 'dmx'].includes(cue.type)) return;
+        if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'stop', 'conditional', 'animate', 'state-changer', 'select'].includes(cue.type)) return;
         if (cue.disabled) return;
         
         const showOnMaster = !isProjector || (displayId === 'all') || (cue.targetDisplay === 'all' || String(cue.targetDisplay) === String(displayId));
@@ -2199,19 +1910,6 @@ export default function App() {
         if (cue.chromaKeyEnabled) { const chromaEl = document.getElementById(`master-chroma-${cue.id}`); if (chromaEl) mediaEl = chromaEl; }
         if (!mediaEl) return; if (mediaEl instanceof HTMLVideoElement && mediaEl.readyState < 2) return; if (mediaEl instanceof HTMLImageElement && !mediaEl.complete) return;
         
-        // If the cue has a custom shader assigned AND we aren't in Basic survival mode
-        let renderSource = mediaEl;
-        if (cue.shaderId && !perfFlags.disableShaders) {
-            if (['blur', 'noise', 'edge'].includes(cue.shaderId)) {
-                const customEl = document.getElementById(`master-customshader-${cue.id}`);
-                if (customEl) renderSource = customEl;
-            } else {
-                const width = mediaEl.videoWidth || mediaEl.naturalWidth || mediaEl.width || 1920;
-                const height = mediaEl.videoHeight || mediaEl.naturalHeight || mediaEl.height || 1080;
-                renderSource = glslEngine.processFrame(mediaEl, cue.shaderId, width, height);
-            }
-        }
-
         const cueOpac = animModifiers[cue.number]?.customOpacity !== undefined ? animModifiers[cue.number].customOpacity : (cue.customOpacity !== undefined ? cue.customOpacity : 1); 
         if (showOnMaster) masterCtx.globalAlpha = opacity * cueOpac;
         if (showOnWebRTC) webrtcCtx.globalAlpha = opacity * cueOpac;
@@ -2308,10 +2006,10 @@ export default function App() {
                    maskCtx.clearRect(0, 0, sw, sh);
                    maskCtx.drawImage(maskEl, sx, sy, sw, sh, 0, 0, sw, sh); 
                    maskCtx.globalCompositeOperation = 'source-in'; 
-                   maskCtx.drawImage(renderSource, sx, sy, sw, sh, 0, 0, sw, sh);
+                   maskCtx.drawImage(mediaEl, sx, sy, sw, sh, 0, 0, sw, sh);
                    drawWrapper(maskCanvas);
-               } else drawWrapper(renderSource);
-            } else drawWrapper(renderSource);
+               } else drawWrapper(mediaEl);
+            } else drawWrapper(mediaEl);
         } catch(err) { }
         if (showOnMaster) { masterCtx.globalAlpha = 1; masterCtx.filter = 'none'; }
         if (showOnWebRTC) { webrtcCtx.globalAlpha = 1; webrtcCtx.filter = 'none'; }
@@ -2376,7 +2074,7 @@ export default function App() {
     return () => cancelAnimationFrame(animId);
   }, [stageSize, gridSize, isProjector, displayId]);
 
-  useEffect(() => { cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => { if (['image', 'goto', 'camera', 'blackout', 'pause', 'counter', 'stop', 'group', 'time', 'text', 'msc', 'osc', 'projector', 'conditional', 'timer', 'animate', 'select', 'dmx'].includes(cue.type)) return; const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`); if (el) { if (isPaused && (!cue.lockedBy || globalPause)) el.pause(); else { const p = el.play(); if (p !== undefined) p.catch(()=>{}); } } }); }, [isPaused, globalPause, cues]);
+  useEffect(() => { cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => { if (['image', 'goto', 'camera', 'blackout', 'pause', 'counter', 'stop', 'group', 'time', 'text', 'msc', 'osc', 'conditional', 'timer', 'animate', 'select'].includes(cue.type)) return; const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`); if (el) { if (isPaused && (!cue.lockedBy || globalPause)) el.pause(); else { const p = el.play(); if (p !== undefined) p.catch(()=>{}); } } }); }, [isPaused, globalPause, cues]);
   
   useEffect(() => { 
     if (isProjector) return; 
@@ -2414,7 +2112,7 @@ export default function App() {
         ...migrated, description: migrated.description || '', groupId: migrated.groupId ?? null, groupMode: migrated.groupMode || 'fire-all', isExpanded: migrated.isExpanded ?? true, cameraLive: migrated.cameraLive ?? true, maskEnabled: migrated.maskEnabled ?? false, maskDataUrl: migrated.maskDataUrl ?? null, chromaKeyEnabled: migrated.chromaKeyEnabled ?? false, chromaKeyColor: migrated.chromaKeyColor || '#00ff00', chromaKeySimilarity: migrated.chromaKeySimilarity ?? 0.4, chromaKeySmoothness: migrated.chromaKeySmoothness ?? 0.1, counterLimit: migrated.counterLimit ?? 1, counterCurrent: migrated.counterCurrent ?? 0, gotoMode: migrated.gotoMode || 'specific', targetCueRangeMin: migrated.targetCueRangeMin || '', targetCueRangeMax: migrated.targetCueRangeMax || '', scheduleDate: migrated.scheduleDate || '', scheduleTime: migrated.scheduleTime || '', textContent: migrated.textContent || '', textColor: migrated.textColor || '#ffffff', textScale: migrated.textScale || 100, fontFamily: migrated.fontFamily || 'sans-serif', fontWeight: migrated.fontWeight || 'bold', fontStyle: migrated.fontStyle || 'normal', textAlign: migrated.textAlign || 'center', textX: migrated.textX ?? 50, textY: migrated.textY ?? 50, textShadowEnabled: migrated.textShadowEnabled ?? false, textShadowColor: migrated.textShadowColor || '#000000', textShadowBlur: migrated.textShadowBlur ?? 10, textShadowOffsetX: migrated.textShadowOffsetX ?? 5, textShadowOffsetY: migrated.textShadowOffsetY ?? 5, textSmoothing: migrated.textSmoothing ?? true, mscDevice: migrated.mscDevice ?? 0, mscCommand: migrated.mscCommand || 'GO', mscCue: migrated.mscCue || '1', oscIp: migrated.oscIp || '127.0.0.1', oscPort: migrated.oscPort ?? 8000, oscAddress: migrated.oscAddress || '/tuxshow/go', oscArgs: migrated.oscArgs || '', targetDisplay: migrated.targetDisplay || 'all', targetCueNumber: migrated.targetCueNumber || '',
         scaleX: migrated.scaleX ?? 100, scaleY: migrated.scaleY ?? 100, keepAspect: migrated.keepAspect ?? true, posX: migrated.posX ?? 50, posY: migrated.posY ?? 50, cropTop: migrated.cropTop ?? 0, cropBottom: migrated.cropBottom ?? 0, cropLeft: migrated.cropLeft ?? 0, cropRight: migrated.cropRight ?? 0, outlineEnabled: migrated.outlineEnabled ?? false, outlineColor: migrated.outlineColor || '#ffffff', outlineWidth: migrated.outlineWidth ?? 2, warpEnabled: migrated.warpEnabled ?? false, warpPins: migrated.warpPins || [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],
         mediaSyncOffset: migrated.mediaSyncOffset || 0, mediaIn: migrated.mediaIn || 0, mediaOut: migrated.mediaOut || 0, holdAtEnd: migrated.holdAtEnd || false, fadeTargetCue: migrated.fadeTargetCue || '', colorFilterEnabled: migrated.colorFilterEnabled ?? false, hue: migrated.hue || 0, saturation: migrated.saturation ?? 100, brightness: migrated.brightness ?? 100,
-        timerDuration: migrated.timerDuration || 60, timerStyle: migrated.timerStyle || 'countdown', timerFormat: migrated.timerFormat || 'MM:SS', timerVisible: migrated.timerVisible ?? true, customOpacity: migrated.customOpacity, shaderId: migrated.shaderId || '', shaderBlurRadius: migrated.shaderBlurRadius ?? 5.0, shaderNoiseIntensity: migrated.shaderNoiseIntensity ?? 0.5, shaderNoiseSpeed: migrated.shaderNoiseSpeed ?? 1.0,
+        timerDuration: migrated.timerDuration || 60, timerStyle: migrated.timerStyle || 'countdown', timerFormat: migrated.timerFormat || 'MM:SS', timerVisible: migrated.timerVisible ?? true, customOpacity: migrated.customOpacity,
         conditionRunMode: migrated.conditionRunMode || 'immediate', conditionType: migrated.conditionType || 'cue-state', conditionTargetCue: migrated.conditionTargetCue || '', conditionState: migrated.conditionState || 'playing', conditionOscPath: migrated.conditionOscPath || '/tuxshow/sensor', conditionOscValue: migrated.conditionOscValue || '1', trueTargetCue: migrated.trueTargetCue || '', falseTargetCue: migrated.falseTargetCue || ''
       };
     });
@@ -2426,73 +2124,125 @@ export default function App() {
     setGlobalPause(false);
   }, []);
 
-  const handleLoadShow = useCallback(async () => {
+  const handleLoadShow = useCallback((e) => { 
+    const file = e.target.files[0]; if (!file) return; 
+    setWorkspaceName(file.name);
+    
+    let baseDir = '';
     try {
-        const { ipcRenderer } = window.require('electron');
-        const result = await ipcRenderer.invoke('open-workspace');
+      let filePath = file.path;
+      try {
+        const { webUtils } = window.require('electron');
+        const webPath = webUtils.getPathForFile(file);
+        if (webPath) filePath = webPath;
+      } catch(err) {}
+      
+      if (filePath) {
+          const path = window.require('path');
+          baseDir = path.dirname(filePath);
+      }
+    } catch(err) { console.error("Base directory resolution failed:", err); }
 
-        if (result.success && result.data) {
-            const filePath = result.filePath;
-            setWorkspaceName(filePath.split(/[/\\]/).pop());
-
-            let loadedState;
-            try {
-                loadedState = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
-            } catch (err) {
-                alert("Invalid Workspace file.");
-                return;
-            }
-
-            if (loadedState.cues) {
-                const path = window.require('path');
-                const baseDir = path.dirname(filePath);
-
-                // For regular .TSW files, rewrite relative media paths
-                if (!filePath.toLowerCase().endsWith('.tspack')) {
-                    loadedState.cues = loadedState.cues.map(c => {
-                        if (c.url && c.url.startsWith('./')) {
-                            let absolutePath = path.join(baseDir, c.url.slice(2));
-                            absolutePath = absolutePath.replace(/\\/g, '/');
-                            const prefix = absolutePath.startsWith('/') ? 'file://' : 'file:///';
-                            return { ...c, url: `${prefix}${absolutePath.replace(/#/g, '%23').replace(/\?/g, '%3F')}` };
-                        }
-                        return c;
-                    });
-                }
-
-                const isOldFormat = loadedState.cues.some(c => c.fadeTime !== undefined || c.autoAdvance !== undefined);
-                if (isOldFormat) setPendingLoadState(loadedState); else applyLoadedState(loadedState);
-            }
-        } else if (result.error) {
-            alert("Failed to load showfile: " + result.error);
+    const reader = new FileReader(); 
+    reader.onload = (event) => { 
+      try { 
+        const loadedState = JSON.parse(event.target.result); 
+        if (loadedState.cues) {
+          if (baseDir) {
+              try {
+                  const path = window.require('path');
+                  loadedState.cues = loadedState.cues.map(c => {
+                      if (c.url && c.url.startsWith('./')) {
+                          let absolutePath = path.join(baseDir, c.url.slice(2));
+                          absolutePath = absolutePath.replace(/\\/g, '/');
+                          const prefix = absolutePath.startsWith('/') ? 'file://' : 'file:///';
+                          return { ...c, url: `${prefix}${absolutePath.replace(/#/g, '%23').replace(/\?/g, '%3F')}` };
+                      }
+                      return c;
+                  });
+              } catch(e) { console.error("URL remapping failed:", e); }
+          }
+          const isOldFormat = loadedState.cues.some(c => c.fadeTime !== undefined || c.autoAdvance !== undefined);
+          if (isOldFormat) setPendingLoadState(loadedState); else applyLoadedState(loadedState);
         }
-    } catch (err) {
-        console.error("Error invoking open-workspace:", err);
-    }
+      } catch (err) { alert("Invalid .TSW file."); } 
+    }; 
+    reader.readAsText(file); e.target.value = ''; 
   }, [applyLoadedState]);
-
+  
   const handlePackWorkspace = useCallback(async () => {
     if (!packPath) return;
     setIsPacking(true);
-    setPackProgress('Archiving workspace and media securely...');
-    
+    setPackProgress('Initializing...');
     try {
-        const { ipcRenderer } = window.require('electron');
-        const result = await ipcRenderer.invoke('create-tspack', { packPath, cues, pins, gridSize });
+        const fs = window.require('fs');
+        const path = window.require('path');
         
-        if (result.success) {
-            setPackProgress('Packing complete! .TSPack archive created.');
-            // Only update the workspace name if it successfully packed
-            setWorkspaceName(result.filePath.split(/[/\\]/).pop());
-            
-            setTimeout(() => {
-                setShowPackModal(false);
-                setPackProgress('');
-                setIsPacking(false);
-            }, 2500);
-        } else {
-            throw new Error(result.error);
+        if (!fs.existsSync(packPath)) {
+            await fs.promises.mkdir(packPath, { recursive: true });
         }
+        
+        const mediaDir = path.join(packPath, 'media');
+        if (!fs.existsSync(mediaDir)) {
+            await fs.promises.mkdir(mediaDir, { recursive: true });
+        }
+
+        let packedCues = JSON.parse(JSON.stringify(cues));
+        const copiedFilesMap = new Map();
+        const copyPromises = [];
+
+        for (let i = 0; i < packedCues.length; i++) {
+            let cue = packedCues[i];
+            if (cue.url && cue.url.startsWith('file://')) {
+                let originalPath = decodeURIComponent(cue.url.replace('file://', ''));
+                if (process.platform === 'win32' && originalPath.startsWith('/')) {
+                    originalPath = originalPath.slice(1);
+                }
+
+                if (copiedFilesMap.has(originalPath)) {
+                    cue.url = copiedFilesMap.get(originalPath);
+                    continue;
+                }
+
+                if (fs.existsSync(originalPath)) {
+                    const fileName = path.basename(originalPath);
+                    let safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+                    let newPath = path.join(mediaDir, safeFileName);
+                    
+                    if (fs.existsSync(newPath)) {
+                        safeFileName = `${Date.now()}_${safeFileName}`;
+                        newPath = path.join(mediaDir, safeFileName);
+                    }
+                    
+                    const relativeUrl = `./media/${safeFileName}`;
+                    cue.url = relativeUrl;
+                    copiedFilesMap.set(originalPath, relativeUrl);
+                    
+                    copyPromises.push(fs.promises.copyFile(originalPath, newPath));
+                } else {
+                    console.warn("File not found to pack:", originalPath);
+                }
+            }
+        }
+
+        if (copyPromises.length > 0) {
+            setPackProgress(`Copying ${copyPromises.length} files...`);
+            await Promise.all(copyPromises);
+        }
+
+        setPackProgress('Saving workspace file...');
+        const stateToSave = { cues: packedCues.map(c => ({ ...c, state: 'stopped' })), pins, gridSize, isPaused: false, globalPause: false };
+        const tswPath = path.join(packPath, 'packed_show.TSW');
+        await fs.promises.writeFile(tswPath, JSON.stringify(stateToSave, null, 2));
+
+        setPackProgress('Packing complete! Portable workspace created.');
+        setWorkspaceName('packed_show.TSW');
+        setTimeout(() => {
+            setShowPackModal(false);
+            setPackProgress('');
+            setIsPacking(false);
+        }, 2500);
+
     } catch (err) {
         setPackProgress(`Error: ${err.message}`);
         setIsPacking(false);
@@ -2634,7 +2384,6 @@ export default function App() {
               {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
               {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
               {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
-              {['blur', 'noise', 'edge'].includes(cue.shaderId) && <CustomShaderFilter cue={cue} />}
               {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
             </Fragment>
           ))}
@@ -2664,7 +2413,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-600 relative ${perfFlags.disableCssAnimations ? 'disable-animations' : ''}`}>
+    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-600 relative">
       <style>{` @keyframes meter { 0% { transform: scaleY(0.2); } 100% { transform: scaleY(1); } } `}</style>
 
       <datalist id="url-history">
@@ -2680,7 +2429,6 @@ export default function App() {
             {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
             {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
             {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
-            {['blur', 'noise', 'edge'].includes(cue.shaderId) && <CustomShaderFilter cue={cue} />}
             {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
           </Fragment>
         ))}
@@ -2773,21 +2521,19 @@ export default function App() {
                   value={packPath} 
                   onChange={(e) => setPackPath(e.target.value)} 
                   className="flex-1 bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-3 py-2 text-sm text-gray-200 outline-none font-mono" 
-                  placeholder="/home/user/Desktop/MyPackedShow.TSPack" 
+                  placeholder="/home/user/Desktop/MyPackedShow" 
                 />
-                <button onClick={async () => {
-                    try {
-                        const { ipcRenderer } = window.require('electron');
-                        const { canceled, filePath } = await ipcRenderer.invoke('choose-pack-destination');
-                        if (!canceled && filePath) {
-                            setPackPath(filePath);
+                <button onClick={() => packDirInputRef.current?.click()} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-4 py-2 text-sm font-semibold text-gray-300 transition-colors">Browse</button>
+                <input type="file" webkitdirectory="true" directory="true" ref={packDirInputRef} className="hidden" onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                        try {
+                            const path = window.require('path');
+                            setPackPath(path.dirname(e.target.files[0].path));
+                        } catch(err) {
+                            setPackPath(e.target.files[0].path);
                         }
-                    } catch(e) {
-                        console.error("Failed to open save dialog", e);
                     }
-                }} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-4 py-2 text-sm font-semibold text-gray-300 transition-colors">
-                    Browse
-                </button>
+                }} />
             </div>
             <p className="text-[10px] text-gray-600 mb-4 italic">* If using Browse, select a folder that contains at least 1 file to bypass Chromium restrictions.</p>
             
@@ -2929,19 +2675,6 @@ export default function App() {
                       placeholder="/display1" 
                     />
                   </div>
-                  <div className="mt-3">
-                      <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Security PIN (Optional)</label>
-                      <input 
-                          type="text" 
-                          placeholder="Leave blank for public access" 
-                          value={virtualDisplayConfig.pin || ''} 
-                          onChange={(e) => setVirtualDisplayConfig({...virtualDisplayConfig, pin: e.target.value})} 
-                          className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" 
-                      />
-                      <p className="text-[9px] text-gray-600 mt-1 italic">
-                          * If set, all remote devices (Deck, Buzzer, Viewer) will be blocked by a PIN pad.
-                      </p>
-                  </div>
                 </div>
 
                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Dedicated Receiver Mode</h4>
@@ -2988,56 +2721,6 @@ export default function App() {
                     <label className="text-xs text-gray-400">Device Name/ID:</label>
                     <input type="text" value={ioConfig.mscDevice} disabled={!ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscDevice: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-purple-500" placeholder="e.g. 0 or 'Launchpad'" />
                   </div>
-                </div>
-
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Multi-Machine Redundancy</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="block text-xs text-gray-400 mb-2">Network Role:</label>
-                  <select 
-                      value={syncMode} 
-                      onChange={(e) => setSyncMode(e.target.value)} 
-                      className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
-                  >
-                      <option value="standalone">Standalone (Local Operation Only)</option>
-                      <option value="master">Master (Broadcast Timeline State)</option>
-                      <option value="backup">Backup (Slave to Master over LAN)</option>
-                  </select>
-                  <p className="text-[9px] text-gray-500 mt-2 italic leading-relaxed">
-                      * Master broadcasts UDP heartbeats. Backup listens and instantly slaves its local timeline to match.
-                  </p>
-                  {syncMode === 'master' && (
-                      <div className="mt-4 pt-3 border-t border-gray-800">
-                          <label className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-2">Deploy .TSPack to Backup</label>
-                          <div className="flex gap-2">
-                              <input type="text" id="backup-ip-input" placeholder="Backup IP (e.g. 192.168.1.51)" className="w-1/2 bg-black border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
-                              <button onClick={async (e) => {
-                                  const ip = document.getElementById('backup-ip-input').value;
-                                  if (!ip) return alert('Enter Backup IP Address');
-                                  
-                                  try {
-                                      const { ipcRenderer } = window.require('electron');
-                                      const { canceled, filePaths } = await ipcRenderer.invoke('show-open-dialog', { title: 'Select Pack to Push', filters: [{ name: 'TSPack', extensions: ['TSPack'] }] });
-                                      if (!canceled && filePaths.length > 0) {
-                                          const btn = e.target;
-                                          const originalText = btn.innerText;
-                                          btn.innerText = 'Pushing...';
-                                          btn.disabled = true;
-                                          
-                                          const res = await ipcRenderer.invoke('push-tspack-to-backup', { packPath: filePaths[0], targetIp: ip });
-                                          
-                                          btn.innerText = originalText;
-                                          btn.disabled = false;
-                                          
-                                          if (res.success) alert('Pack successfully deployed and loaded on Backup!');
-                                          else alert('Failed to push pack: ' + res.error);
-                                      }
-                                  } catch (err) {}
-                              }} className="flex-1 bg-blue-900/50 hover:bg-blue-800 border border-blue-700 text-blue-200 rounded px-2 py-1.5 text-xs font-bold transition-colors disabled:opacity-50">
-                                  Select Pack & Push
-                              </button>
-                          </div>
-                      </div>
-                  )}
                 </div>
 
                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Stream Deck Config</h4>
@@ -3123,7 +2806,6 @@ export default function App() {
               handleGo={handleGo} handleStopAll={handleStopAll} handleRenumberCues={handleRenumberCues}
               clipboardCues={clipboardCues} setClipboardCues={setClipboardCues}
               isRecording={isRecording} toggleRecording={toggleRecording}
-              disableVisualizers={perfFlags.disableVisualizers}
             />
           ) : (
             <div className="h-full w-full flex flex-col border-r border-gray-800 bg-gray-950">
@@ -3188,7 +2870,7 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar localIp={localIp} virtualDisplayConfig={virtualDisplayConfig} ioConfig={ioConfig} setShowQrModal={setShowQrModal} masterVolumeUI={masterVolumeUI} handleMasterVolumeSlider={handleMasterVolumeSlider} performanceTier={performanceTier} syncMode={syncMode} />
+      <StatusBar localIp={localIp} virtualDisplayConfig={virtualDisplayConfig} ioConfig={ioConfig} setShowQrModal={setShowQrModal} masterVolumeUI={masterVolumeUI} handleMasterVolumeSlider={handleMasterVolumeSlider} />
       
       {isPluginManagerOpen && (
         <PluginManagerModal onClose={() => setIsPluginManagerOpen(false)} />

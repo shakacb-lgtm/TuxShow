@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+[1.4.0] - 2026-06-03
+
+Added
+
+Plugin Extensibility & Canvas Firewall: Introduced a secure `contextBridge` API for custom third-party plugins.
+Plugin Manager GUI: Operators can now install, monitor, and toggle third-party logic extensions safely.
+Multi-Machine Redundancy: Introduced Master and Backup networking modes. The Master broadcasts timeline state via UDP, and the Backup instantly slaves its playback engine to provide mission-critical hot-standby redundancy.
+Native .TSPack Archiving: Re-engineered the "Pack Workspace" utility to use the Node.js backend and native Ubuntu `tar` commands, bypassing browser memory constraints for massive shows.
+PWA Security Gateway: Added a PIN protection layer to the Virtual HTTP Display server to secure remote WebRTC feeds and PWA control surfaces (Deck, Buzzer, etc.) from unauthorized network access.
+Live Media Monitor: Transformed the Inspector into a dual-mode panel. Operators can now switch to a "Live Media" tab to view, scrub, pause, or kill currently active media directly via the DOM without altering saved cue states.
+Sequence Snippets: Added the ability to natively save and load Sequence cue children as portable `.tssnip` JSON template files.
+
+Fixed & Optimized
+
+Projector Animation Sync: Fixed a bug where `animate` tweens were dropping payloads on spawned projector windows by shifting the interpolation math directly into the main 60Hz rendering loop.
+Backend Socket Hardening: Patched critical unhandled exceptions (`EADDRINUSE`) in the UDP `syncEngine` and missing file stream error handlers that could cause complete application crashes during port collisions or locked directories.
+ES Module Refactor: Upgraded internal backend engines (`syncEngine.js`, etc.) to strict ES Modules to match the Vite/Node ecosystem standards and resolve `ERR_REQUIRE_ESM` boot crashes.
+Native Open/Save Dialogs: Unified the Workspace loader to handle `.TSW`, `.TSShow`, and automatic extraction of `.TSPack` archives natively via OS-level dialogs rather than hidden HTML inputs.
+
 [1.3.0] - 2026-05-29
 
 Added

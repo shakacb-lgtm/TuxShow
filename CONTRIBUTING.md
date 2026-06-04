@@ -32,6 +32,13 @@ TuxShow is built using Electron, React, and Vite, optimized for Ubuntu Linux.
 3. Push your branch to your fork: `git push origin feature/my-new-feature`
 4. Open a Pull Request against the `main` branch of the official TuxShow repository.
 
+#### Release & Version Bump Procedure
+When preparing a new release, ensure the version number is bumped in all of the following locations before building:
+1. `package.json` (Source of truth for the release script)
+2. `CHANGELOG.md` (Add the new version section and date)
+3. `src/App.jsx` (Update the Header subtitle and the About Modal)
+4. Run `python3 release_manager.py` to draft and upload the GitHub release.
+
 ## 🤝 Code of Conduct
 By participating in this project, you agree to abide by our Code of Conduct. We are committed to providing a welcoming and inspiring environment for students, educators, and developers alike.
 

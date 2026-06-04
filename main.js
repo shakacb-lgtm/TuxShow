@@ -1,6 +1,10 @@
 import electronPkg from 'electron';
 const { app, BrowserWindow, screen, ipcMain, dialog, Menu } = electronPkg;
 import path from 'path';
+import { pluginManager } from './pluginManager.js';
+import { projectorEngine } from './projectorEngine.js';
+import { dmxEngine } from './dmxEngine.js';
+import { syncEngine } from './syncEngine.js';
 import { fileURLToPath } from 'url';
 import { exec, execSync, spawn } from 'child_process';
 import { createRequire } from 'module';
@@ -9,13 +13,6 @@ import fsPromises from 'fs/promises';
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-let fixWebmDuration;
-try {
-  fixWebmDuration = require('webm-duration-fix');
-} catch (e) {
-  console.warn("[TuxShow] webm-duration-fix module not found. Run 'npm install webm-duration-fix'");
-}
 
 // =========================================================================
 // GPU AUTO-HEAL & COMPATIBILITY LAYER
@@ -78,7 +75,7 @@ function createWindow() {
     width: 600, height: 400, transparent: true, frame: false, alwaysOnTop: true, icon: iconPath,
     x: Math.round(x + (width - 600) / 2),
     y: Math.round(y + (height - 400) / 2),
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
+    webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
   });
 
   if (app.isPackaged) splashWindow.loadFile(path.join(__dirname, 'dist', 'splash.html'));
@@ -88,7 +85,12 @@ function createWindow() {
     width: 1280, height: 720, title: "TuxShow", show: false, icon: iconPath,
     x: Math.round(x + (width - 1280) / 2),
     y: Math.round(y + (height - 720) / 2),
-    webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
+    webPreferences: { 
+      nodeIntegration: true, 
+      contextIsolation: false, 
+      webSecurity: false,
+      preload: path.join(__dirname, 'src', 'preload.js')
+    }
   });
 
   // Native Context Menu for Text Fields (Zero React Overhead)
@@ -119,6 +121,10 @@ function createWindow() {
     };
     loadVite();
   }
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    syncEngine.init(mainWindow.webContents);
+  });
 
   mainWindow.once('ready-to-show', () => {
     try { mainWindow.webContents.setWebRTCIPHandlingPolicy('default_public_and_private_interfaces'); } catch (e) {}
@@ -151,6 +157,322 @@ function createWindow() {
     });
   });
 
+  ipcMain.handle('get-local-ip', () => {
+    try {
+      const os = require('os');
+      const nets = os.networkInterfaces();
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+          // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
+          if (net.family === 'IPv4' && !net.internal) {
+            return net.address;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching local IP:", e);
+    }
+    return '127.0.0.1'; // Fallback
+  });
+
+  ipcMain.handle('get-system-profile', () => {
+    try {
+      const os = require('os');
+      const cpus = os.cpus();
+      return {
+          cpuCores: cpus.length,
+          cpuModel: cpus[0]?.model || 'Unknown CPU',
+          totalRamGB: Math.round(os.totalmem() / (1024 * 1024 * 1024)),
+          freeRamGB: Math.round(os.freemem() / (1024 * 1024 * 1024)),
+          platform: process.platform
+      };
+    } catch (e) {
+      console.error("[TuxShow] Error gathering system profile:", e);
+      return null;
+    }
+  });
+
+  // --- CORE APP FILE SYSTEM & DIALOG HANDLERS ---
+  ipcMain.handle('show-open-dialog', async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, options);
+    return result;
+  });
+
+  ipcMain.handle('read-show-file', async (event, filePath) => {
+    try {
+      // Hardened approach: we return parsed text data, never file handles
+      const data = await fsPromises.readFile(filePath, 'utf-8');
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('open-workspace', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+        title: 'Open Workspace',
+        properties: ['openFile'],
+        filters: [
+            { name: 'TuxShow Workspaces', extensions: ['TSW', 'TSShow', 'TSPack', 'json'] },
+            { name: 'All Files', extensions: ['*'] }
+        ]
+    });
+
+    if (!canceled && filePaths.length > 0) {
+        const fs = require('fs');
+        const path = require('path');
+        const targetPath = filePaths[0];
+
+        // IF IT IS A PACKED ARCHIVE, EXTRACT IT FIRST
+        if (targetPath.toLowerCase().endsWith('.tspack')) {
+            const os = require('os');
+            const { execSync } = require('child_process');
+            
+            console.log('[Loader] .TSPack detected. Extracting...');
+            const syncDir = path.join(os.tmpdir(), 'tuxshow-active-sync');
+            if (fs.existsSync(syncDir)) fs.rmSync(syncDir, { recursive: true, force: true });
+            fs.mkdirSync(syncDir, { recursive: true });
+
+            try {
+                execSync(`tar -xzf "${targetPath}" -C "${syncDir}"`);
+                const showJsonPath = path.join(syncDir, 'show.json');
+                
+                if (fs.existsSync(showJsonPath)) {
+                    let showData = JSON.parse(fs.readFileSync(showJsonPath, 'utf8'));
+                    
+                    // Rewrite relative media paths to the absolute extraction folder
+                    if (showData.cues) {
+                        showData.cues = showData.cues.map(c => {
+                            if (c.url && c.url.startsWith('./media/')) {
+                                const newUrl = path.join(syncDir, 'media', c.url.replace('./media/', ''));
+                                return { ...c, url: 'file://' + newUrl.replace(/\\/g, '/') };
+                            }
+                            return c;
+                        });
+                    }
+                    return { success: true, data: JSON.stringify(showData), filePath: targetPath };
+                } else {
+                    throw new Error("show.json not found inside the .TSPack archive.");
+                }
+            } catch (err) {
+                return { success: false, error: "Failed to extract .TSPack: " + err.message };
+            }
+        } 
+        
+        // IF IT IS A STANDARD .TSW OR .TSSHOW, READ IT DIRECTLY
+        else {
+            const rawData = fs.readFileSync(targetPath, 'utf-8');
+            return { success: true, data: rawData, filePath: targetPath };
+        }
+    }
+    return { success: false, canceled: true };
+  });
+
+  ipcMain.handle('save-show-file', async (event, filePath, data) => {
+    try {
+      await fsPromises.writeFile(filePath, data, 'utf-8');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('choose-pack-destination', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save Packed Workspace',
+      defaultPath: 'show.TSPack',
+      filters: [{ name: 'TuxShow Pack', extensions: ['TSPack'] }]
+    });
+    return { canceled, filePath };
+  });
+
+  // SAVE SEQUENCE SNIPPET
+  ipcMain.handle('save-sequence-snippet', async (event, snippetData) => {
+    try {
+      const { dialog } = require('electron');
+      const fs = require('fs');
+      const { filePath } = await dialog.showSaveDialog({
+        title: 'Save Sequence Snippet',
+        defaultPath: 'sequence.tssnip',
+        filters: [{ name: 'TuxShow Snippet', extensions: ['tssnip'] }]
+      });
+      
+      if (filePath) {
+        fs.writeFileSync(filePath, JSON.stringify(snippetData, null, 2));
+        return { success: true, filePath };
+      }
+      return { success: false, canceled: true };
+    } catch (e) {
+      console.error("[TuxShow] Error saving snippet:", e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // LOAD SEQUENCE SNIPPET
+  ipcMain.handle('load-sequence-snippet', async (event) => {
+    try {
+      const { dialog } = require('electron');
+      const fs = require('fs');
+      const { filePaths } = await dialog.showOpenDialog({
+        title: 'Load Sequence Snippet',
+        properties: ['openFile'],
+        filters: [{ name: 'TuxShow Snippet', extensions: ['tssnip'] }]
+      });
+      
+      if (filePaths && filePaths.length > 0) {
+        const rawData = fs.readFileSync(filePaths[0], 'utf-8');
+        const parsedData = JSON.parse(rawData);
+        return { success: true, data: parsedData };
+      }
+      return { success: false, canceled: true };
+    } catch (e) {
+      console.error("[TuxShow] Error loading snippet:", e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('set-sync-mode', (event, { mode, port }) => {
+      try {
+          syncEngine.setMode(mode, port);
+          return { success: true, mode };
+      } catch (e) {
+          console.error("[TuxShow] Error setting sync mode:", e);
+          return { success: false, error: e.message };
+      }
+  });
+
+  ipcMain.handle('create-tspack', async (event, { packPath, cues, pins, gridSize }) => {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execAsync = util.promisify(exec);
+
+    try {
+      console.log(`[Packer] Initializing .TSPack creation at: ${packPath}`);
+      
+      // 1. Create a temporary staging directory
+      const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tuxshow-pack-'));
+      const mediaDir = path.join(stagingDir, 'media');
+      fs.mkdirSync(mediaDir);
+
+      // 2. Process cues and copy media natively
+      let packedCues = JSON.parse(JSON.stringify(cues));
+      const copiedFilesMap = new Map();
+
+      for (let i = 0; i < packedCues.length; i++) {
+        let cue = packedCues[i];
+        if (cue.url && cue.url.startsWith('file://')) {
+          let originalPath = decodeURIComponent(cue.url.replace('file://', ''));
+          
+          if (process.platform === 'win32' && originalPath.startsWith('/')) {
+              originalPath = originalPath.slice(1);
+          }
+
+          if (copiedFilesMap.has(originalPath)) {
+              cue.url = copiedFilesMap.get(originalPath);
+              continue;
+          }
+
+          if (fs.existsSync(originalPath)) {
+              const fileName = path.basename(originalPath);
+              let safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+              let newPath = path.join(mediaDir, safeFileName);
+              
+              if (fs.existsSync(newPath)) {
+                  safeFileName = `${Date.now()}_${safeFileName}`;
+                  newPath = path.join(mediaDir, safeFileName);
+              }
+              
+              fs.copyFileSync(originalPath, newPath);
+              const relativeUrl = `./media/${safeFileName}`;
+              cue.url = relativeUrl;
+              copiedFilesMap.set(originalPath, relativeUrl);
+          } else {
+              console.warn(`[Packer] Warning: Media file not found - ${originalPath}`);
+          }
+        }
+      }
+
+      // 3. Write the workspace JSON
+      const stateToSave = { 
+          cues: packedCues.map(c => ({ ...c, state: 'stopped' })), 
+          pins, 
+          gridSize, 
+          isPaused: false, 
+          globalPause: false 
+      };
+      const tswPath = path.join(stagingDir, 'show.json');
+      fs.writeFileSync(tswPath, JSON.stringify(stateToSave, null, 2));
+
+      // 4. Compress using native OS tar command
+      const finalDest = packPath.endsWith('.TSPack') ? packPath : `${packPath}.TSPack`;
+      
+      // Ensure the destination directory exists before tar tries to write the file
+      const destDir = path.dirname(finalDest);
+      if (!fs.existsSync(destDir)) {
+          console.log(`[Packer] Creating missing destination directory: ${destDir}`);
+          fs.mkdirSync(destDir, { recursive: true });
+      }
+
+      // tar -c (create), -z (gzip), -f (file). -C changes dir before executing so the archive root is clean
+      await execAsync(`tar -czf "${finalDest}" -C "${stagingDir}" .`);
+
+      // 5. Cleanup temporary staging directory
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+
+      console.log(`[Packer] Successfully built archive: ${finalDest}`);
+      return { success: true, filePath: finalDest };
+      
+    } catch (err) {
+      console.error('[Packer] Failed to create TSPack:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('push-tspack-to-backup', async (event, { packPath, targetIp }) => {
+    const fs = require('fs');
+    const http = require('http');
+
+    return new Promise((resolve) => {
+        try {
+            const stat = fs.statSync(packPath);
+            const req = http.request({
+                hostname: targetIp,
+                port: 53002, // UDP runs on 53001, HTTP runs on +1
+                path: '/sync-pack',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Length': stat.size
+                }
+            }, (res) => {
+                let body = '';
+                res.on('data', chunk => body += chunk);
+                res.on('end', () => {
+                    if (res.statusCode === 200) resolve({ success: true });
+                    else resolve({ success: false, error: body });
+                });
+            });
+
+            req.on('error', (e) => resolve({ success: false, error: e.message }));
+
+            const readStream = fs.createReadStream(packPath);
+            readStream.on('error', (e) => {
+                console.error('[Packer] Read stream error:', e.message);
+                resolve({ success: false, error: e.message });
+            });
+            readStream.pipe(req);
+        } catch (e) {
+            resolve({ success: false, error: e.message });
+        }
+    });
+  });
+
   // --- RECORDING IPC HANDLERS ---
   // 1. Handle the request to choose a save destination
   ipcMain.handle('choose-record-destination', async (event) => {
@@ -165,6 +487,10 @@ function createWindow() {
     
     // Initialize the write stream
     recordingStream = fs.createWriteStream(filePath);
+    recordingStream.on('error', (err) => {
+        console.error('[TuxShow] Recording stream error:', err.message);
+        recordingStream = null;
+    });
     return filePath;
   });
 
@@ -181,32 +507,31 @@ function createWindow() {
       const finalPath = recordingStream.path;
 
       // Close the stream safely
-      recordingStream.end(async () => {
+      recordingStream.end(() => {
         recordingStream = null;
-        console.log(`[TuxShow] Recording stream closed. Injecting duration: ${durationMs}ms...`);
-
-        try {
-          // Read the completed file into a buffer
-          const fileBuffer = await fsPromises.readFile(finalPath);
-
-          if (fixWebmDuration) {
-            // Inject the missing EBML duration tag
-            const fixedBuffer = await fixWebmDuration(fileBuffer, durationMs);
-            // Overwrite the file with the corrected metadata
-            await fsPromises.writeFile(finalPath, fixedBuffer);
-            console.log('[TuxShow] WebM Metadata successfully injected!');
-          } else {
-            console.warn('[TuxShow] webm-duration-fix is not installed, skipping metadata injection.');
-          }
-        } catch (err) {
-          console.error('[TuxShow] Failed to inject WebM duration:', err);
-        }
+        console.log(`[TuxShow] Recording stream closed. Fixing metadata...`);
+        
+        const fixedPath = finalPath.replace('.webm', '_fixed.webm');
+        
+        // Use native ffmpeg to instantly rebuild the WebM container with correct duration metadata
+        exec(`ffmpeg -y -i "${finalPath}" -c copy "${fixedPath}"`, async (error) => {
+            if (!error) {
+                try {
+                    await fsPromises.rename(fixedPath, finalPath);
+                    console.log('[TuxShow] WebM Metadata successfully injected via FFmpeg!');
+                } catch (e) {
+                    console.error('[TuxShow] Error replacing original file:', e);
+                }
+            } else {
+                console.warn('[TuxShow] FFmpeg fix failed. Is ffmpeg installed on the system?', error);
+            }
+        });
       });
     }
   });
 
   // --- VIRTUAL HTTP DISPLAY ENGINE ---
-  ipcMain.on('start-virtual-display', (event, { port, path: streamPath }) => {
+  ipcMain.on('start-virtual-display', (event, { port, path: streamPath, pin }) => {
     if (virtualHttpServer) { 
       Object.values(virtualClients).forEach(c => { try { c.destroy(); } catch(e){} });
       virtualHttpServer.close(); 
@@ -240,6 +565,53 @@ function createWindow() {
         res.end();
         return;
       }
+
+      // --- AUTHENTICATION GATEWAY ---
+      // Check for the tuxshow_auth cookie
+      const authCookie = req.headers.cookie?.split('; ').find(row => row.startsWith('tuxshow_auth='))?.split('=')[1];
+      
+      // Define which routes require protection (UI and APIs)
+      const baseRoute = req.url.split('?')[0];
+      const isProtected = ['/deck', '/buzzer', '/camera', '/cuelist', streamPath].includes(baseRoute) || 
+                          req.url.startsWith('/api/') || 
+                          req.url === '/mobile-cam-offer' || 
+                          req.url === '/webrtc-offer';
+
+      if (pin && isProtected && authCookie !== pin) {
+          // If it's an API request, cleanly reject it
+          if (req.method === 'POST' || req.url.startsWith('/api/deck/stream')) {
+              res.writeHead(401, { 'Content-Type': 'application/json' }); 
+              res.end(JSON.stringify({ error: 'Unauthorized. PIN required.' })); 
+              return;
+          }
+          
+          // If it's a browser request for a UI, serve the TuxShow PIN Pad
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+              <!DOCTYPE html>
+              <html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"><title>TuxShow Security</title>
+              <style>
+              body { background: #030712; color: #f3f4f6; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+              .box { background: #111827; padding: 30px; border-radius: 12px; border: 1px solid #1f2937; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); width: 80%; max-width: 320px; }
+              h2 { margin-top: 0; color: #60a5fa; font-size: 18px; text-transform: uppercase; letter-spacing: 2px; }
+              p { color: #9ca3af; font-size: 12px; margin-bottom: 20px; }
+              input { background: #000; border: 1px solid #374151; color: #fff; font-size: 24px; padding: 12px; text-align: center; width: 100%; box-sizing: border-box; border-radius: 8px; margin-bottom: 20px; letter-spacing: 12px; outline: none; }
+              input:focus { border-color: #3b82f6; }
+              button { background: #2563eb; color: #fff; border: none; padding: 14px; font-size: 14px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; text-transform: uppercase; letter-spacing: 1px; }
+              button:hover { background: #1d4ed8; }
+              </style></head><body>
+              <div class="box">
+                  <h2>Security Gateway</h2>
+                  <p>A PIN is required to access this interface.</p>
+                  <input type="password" id="pin" pattern="[0-9]*" inputmode="numeric" autofocus>
+                  <button onclick="document.cookie='tuxshow_auth='+document.getElementById('pin').value+';path=/;max-age=31536000';window.location.reload();">Unlock</button>
+              </div>
+              <script>document.getElementById('pin').addEventListener('keypress', function(e){ if(e.key==='Enter') document.querySelector('button').click(); });</script>
+              </body></html>
+          `);
+          return;
+      }
+      // --- END AUTHENTICATION GATEWAY ---
 
       // Handle PWA Manifests & Icon
       if (req.method === 'GET' && req.url === '/manifest-cam.json') {
@@ -594,9 +966,66 @@ function createWindow() {
     }
   });
 
+  // --- PLUGIN MANAGER IPC HANDLERS ---
+  ipcMain.handle('plugin-install-archive', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Install Plugin Archive',
+      filters: [{ name: 'Archives', extensions: ['zip', 'tar.gz', 'tgz', 'gz'] }]
+    });
+    if (canceled || filePaths.length === 0) return { success: false, error: 'User canceled' };
+    return await pluginManager.installArchive(filePaths[0]);
+  });
+
+  ipcMain.handle('plugin-toggle-state', async (event, id, isEnabled) => {
+    try {
+      if (isEnabled) await pluginManager.startPlugin(id);
+      else await pluginManager.stopPlugin(id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('plugin-get-loaded', () => {
+    return pluginManager.getLoadedPlugins();
+  });
+
+  // =======================================================================
+  // TUXSHOW PLUG-IN EXTENSIBILITY IPC HANDLERS
+  // =======================================================================
+  ipcMain.on('tuxshow:requestCueFire', (event, cueId) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Map to the internal OSC listener format that App.jsx already expects
+      mainWindow.webContents.send('osc-message', { path: `/tuxshow/cue/${cueId}/start`, args: [] });
+    }
+  });
+
+  ipcMain.on('tuxshow:pluginStatus', (event, { pluginId, status }) => {
+    console.log(`[Plugin System] ${pluginId} reported status:`, status);
+  });
+
+  ipcMain.on('tuxshow:registerShader', (event, { pluginId, shaderConfig }) => {
+    console.log(`[Plugin System] Registered shader effect from ${pluginId}`);
+    // Forward to the renderer to compile into the WebGL pipeline
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('tuxshow:shader-registered', { pluginId, shaderConfig });
+    }
+  });
+
+  ipcMain.on('tuxshow:writeLog', (event, { pluginId, level, message }) => {
+    console.log(`[Plugin:${pluginId}] [${level.toUpperCase()}] ${message}`);
+  });
+
   ipcMain.on('broadcast-state', (event, state) => {
     lastKnownState = state;
+    syncEngine.broadcastState(state);
     projectorWindows.forEach(win => { if (!win.isDestroyed()) win.webContents.send('sync-state', state); });
+
+    // Broadcast read-only cue telemetry back to the preload bridge
+    if (mainWindow && !mainWindow.isDestroyed() && state.cues) {
+      mainWindow.webContents.send('tuxshow:cueChanged', state.cues);
+    }
   });
 
   ipcMain.on('request-state', (event) => {
@@ -632,6 +1061,14 @@ function createWindow() {
 
   ipcMain.on('send-msc', (event, { device, command, cueNumber }) => { console.log(`[MSC Broadcast Simulation] Device: ${device}, Command: ${command}, Cue: ${cueNumber}`); });
 
+  ipcMain.on('fire-projector-cue', (event, { ip, port, protocol, payload, password }) => {
+    projectorEngine.fireCommand(ip, port, protocol, payload, password);
+  });
+
+  ipcMain.on('fire-dmx-cue', (event, { channel, endValue, duration }) => {
+    dmxEngine.fadeChannel(channel, endValue, duration * 1000);
+  });
+
   ipcMain.on('broadcast-status', (event, data) => {
     const message = `data: ${JSON.stringify(data)}\n\n`;
     deckClients.forEach(client => client.res.write(message));
@@ -647,7 +1084,14 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  await pluginManager.init((plugins) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('plugin-state-changed', plugins);
+    }
+  });
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (virtualHttpServer) {
