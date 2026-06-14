@@ -1,0 +1,10 @@
+{
+  "id": "atmospheric-particles",
+  "name": "Atmospheric Particle Generator",
+  "version": "1.0.0",
+  "description": "Procedural, hardware-accelerated WebGL environmental overlays (Rain, Snow, Fog, Ash, Fairy Dust) for visual cues.",
+  "entryPoints": {
+    "ui": "ui.js"
+  },
+  "permissions": []
+}

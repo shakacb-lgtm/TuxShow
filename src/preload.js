@@ -63,6 +63,7 @@ const coreAppAPI = {
   // =======================================================================
   getDisplays: () => ipcRenderer.invoke('get-displays'),
   getGpuStatus: () => ipcRenderer.invoke('get-gpu-status'),
+  getDebugDiagnostics: () => ipcRenderer.invoke('get-debug-diagnostics'),
 
   // =======================================================================
   // SAFE DIALOGS

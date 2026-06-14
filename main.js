@@ -10,6 +10,43 @@ import { exec, execSync, spawn } from 'child_process';
 import { createRequire } from 'module';
 import fsPromises from 'fs/promises';
 
+// =========================================================================
+// IN-MEMORY LOG BUFFER FOR DIAGNOSTICS
+// =========================================================================
+const recentLogs = [];
+const maxLogCount = 100;
+
+function addLog(level, args) {
+    const timestamp = new Date().toISOString();
+    const message = args.map(arg => {
+        if (arg instanceof Error) return arg.stack || arg.message;
+        return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+    }).join(' ');
+    recentLogs.push({ timestamp, level, message });
+    if (recentLogs.length > maxLogCount) {
+        recentLogs.shift();
+    }
+}
+
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+
+console.log = (...args) => {
+    originalLog.apply(console, args);
+    addLog('info', args);
+};
+
+console.warn = (...args) => {
+    originalWarn.apply(console, args);
+    addLog('warn', args);
+};
+
+console.error = (...args) => {
+    originalError.apply(console, args);
+    addLog('error', args);
+};
+
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -132,6 +169,32 @@ function createWindow() {
       if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
       mainWindow.show(); mainWindow.focus();
     }, 1500); 
+  });
+
+  ipcMain.handle('get-debug-diagnostics', async () => {
+    try {
+      const syncDiags = syncEngine.getDiagnostics();
+      const os = require('os');
+      const cpus = os.cpus();
+      
+      const systemDiags = {
+          cpuCores: cpus.length,
+          cpuModel: cpus[0]?.model || 'Unknown CPU',
+          totalRamGB: Math.round(os.totalmem() / (1024 * 1024 * 1024)),
+          freeRamGB: Math.round(os.freemem() / (1024 * 1024 * 1024)),
+          platform: process.platform,
+          interfaces: os.networkInterfaces()
+      };
+      
+      return {
+          success: true,
+          sync: syncDiags,
+          system: systemDiags,
+          logs: recentLogs
+      };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
   });
 
   ipcMain.handle('get-displays', () => {
@@ -340,6 +403,16 @@ function createWindow() {
           return { success: true, mode };
       } catch (e) {
           console.error("[TuxShow] Error setting sync mode:", e);
+          return { success: false, error: e.message };
+      }
+  });
+
+  ipcMain.handle('set-backup-ip', (event, ip) => {
+      try {
+          syncEngine.setBackupIp(ip);
+          return { success: true };
+      } catch (e) {
+          console.error("[TuxShow] Error setting backup IP:", e);
           return { success: false, error: e.message };
       }
   });
@@ -1067,6 +1140,50 @@ function createWindow() {
 
   ipcMain.on('fire-dmx-cue', (event, { channel, endValue, duration }) => {
     dmxEngine.fadeChannel(channel, endValue, duration * 1000);
+  });
+
+  ipcMain.on('fire-webhook-cue', (event, { url, method, headers, body }) => {
+    if (!url) {
+      event.sender.send('webhook-error', { error: 'URL Endpoint is required', url: '' });
+      return;
+    }
+    try {
+      const parsedHeaders = {};
+      if (headers) {
+        try {
+          Object.assign(parsedHeaders, typeof headers === 'string' ? JSON.parse(headers) : headers);
+        } catch (e) {
+          throw new Error('Malformed custom headers. Expected a valid JSON object.');
+        }
+      }
+      if (body && ['POST', 'PUT', 'PATCH'].includes(method)) {
+        if (!parsedHeaders['Content-Type'] && !parsedHeaders['content-type']) {
+          try {
+            JSON.parse(body);
+            parsedHeaders['Content-Type'] = 'application/json';
+          } catch (e) {}
+        }
+      }
+
+      fetch(url, {
+        method: method || 'GET',
+        headers: parsedHeaders,
+        body: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined
+      })
+      .then(res => {
+        if (!res.ok) {
+          event.sender.send('webhook-error', { error: `HTTP Status Code: ${res.status} ${res.statusText}`, url });
+        }
+        console.log(`[TuxShow Webhook] Triggered: ${method || 'GET'} ${url} -> Status ${res.status}`);
+      })
+      .catch(err => {
+        event.sender.send('webhook-error', { error: `Network connection failed: ${err.message}`, url });
+        console.error(`[TuxShow Webhook] Error triggering: ${method || 'GET'} ${url} ->`, err.message);
+      });
+    } catch (err) {
+      event.sender.send('webhook-error', { error: err.message, url });
+      console.error(`[TuxShow Webhook] Error in webhook cue execution:`, err.message);
+    }
   });
 
   ipcMain.on('broadcast-status', (event, data) => {

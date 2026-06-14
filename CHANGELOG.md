@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+[1.5.0] - 2026-06-11
+
+Added
+
+- **IoT Webhook Cue:** Added native backend fetch handling to bypass browser CORS constraints, allowing seamless HTTP requests (GET, POST, PUT, PATCH, DELETE) to smart controllers (e.g., Philips Hue, Shelly relays) directly from the timeline.
+- **Projector Control Modules:** Implemented `PJLINK:CONTROL` permissions to securely issue power and shutter commands to remote hardware targets.
+- **Layer & DMX Modifiers:** Added `LAYER:MODIFY` routing and Custom Cue Faders to dynamically target standard DMX channels.
+- **Stage Panic Button:** Added a dedicated safety cue utilizing `core.cue.fire` to instantly trigger safety lighting and stage-clear commands.
+- **System Architecture Plugins:** Introduced modular support for multi-machine synchronization and system redundancy.
+- **Sequence / Timeline Cue:** Added automated multitrack parent containers for orchestrating complex action sequences.
+- **Memo / Operator Note Cue:** Added visual console logging (danger, warning, safety info) directly into the operator's contextual inspector.
+- **Multi-Projector Stage Preview Tabs:** Added dedicated tab controls (Composite view, WebRTC virtual stream, and individual hardware displays) to the Stage Preview when multiple outputs are detected, allowing operators to dynamically isolate and preview individual display targets.
+- **Mixed Audio Canvas Recording:** Enhanced the canvas recording (`REC` button) to capture all playback audio (both video and audio cues) in the exported WebM file via a custom Web Audio API graph, bypassing local monitoring mutes.
+- **User Manual PDF Compiler:** Created a headless Electron-based compilation script that parses the markdown user manual, formats it with premium typography and booth comm design sheets, and prints it to a polished A4 PDF.
+
+Optimized & Hardened
+
+- Performance Refactoring: Wrapped `localStorage` saves in a 1000ms debouncer using custom structural change checking to prevent active playhead ticks from causing main thread disk I/O lag.
+- Inspector Memoization: Shielded the React Inspector panel from background playhead updates using custom `areInspectorPropsEqual` memoization to block redundant re-renders.
+- Advanced Batch Editing UX: Added italicized `<Multiple Values>` placeholders and Lucide warning icons for mixed selection properties. Conflicting inputs clear automatically on focus.
+- Live JSON Validation: Enabled live syntax validation and red border styling for headers and body JSON textareas, preventing malformed saves.
+- Webhook Exception Protection: Enclosed backend network parsing and fetches in strict try/catch blocks with a dedicated `webhook-error` IPC bridge.
+- Floating Toast Notifications: Registered UI listener to present a red-themed floating operator warning toast on webhook delivery failures.
+- Surtitle Auto-Advance Lock: Established a 150ms lock preventing double-skips from manual trigger and auto-advance collisions.
+
+[1.4.1] - 2026-06-05
+
+Optimized
+
+- High-Frequency IPC reduction: Silenced background timelineWorker.js `ANIMATION_TICK` postMessages when the timeline is completely idle.
+- GC & Memory Pressure optimization: Replaced `JSON.parse(JSON.stringify)` deep cloning of animation modifiers in App.jsx's 60Hz loop with a lightweight shallow-copy loop.
+- Array Traversal optimization: Consolidated two separate `.filter()` scans over cues inside timelineWorker.js into a single `for` loop traversal.
+- Art-Net buffer optimization: Replaced continuous buffer allocations/concatenations in dmxEngine.js's 44Hz loop with a pre-allocated single packet and mapped `subarray` view.
+- Render closure elimination: Removed closure and array instantiation from `renderLoop` (replaced inner `[1, 2].forEach` with standard `for` loop and moved `drawToCtx`/`drawWrapper` helpers out of the loops).
+- Worker sync throttling: Added state-change tracking (`lastSyncHashRef`) to avoid posting worker updates during high-frequency visual dragging/positioning.
+
 [1.4.0] - 2026-06-03
 
 Added

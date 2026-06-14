@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronRight, Video, Image as ImageIcon, Music, Camera, Moon,
   PauseCircle, Repeat, Wand2, FolderOpen, Folder, CalendarClock, Type,
   Settings2, Wifi, XSquare, GitBranch, Hourglass, CornerDownRight, StopCircle,
-  Layers, ArrowRight, Ear, Lock, Ban, Play, Square, Pause, AlertCircle, Key, MonitorUp, Lightbulb
+  Layers, ArrowRight, Ear, Lock, Ban, Play, Square, Pause, AlertCircle, Key, MonitorUp, Lightbulb, Languages, Globe
 } from 'lucide-react';
 
 // Local helper for formatting time remaining
@@ -16,7 +16,7 @@ const formatTime = (timeInSeconds) => {
 };
 
 const AudioVisualizer = React.memo(({ isPlaying, isPaused, type }) => {
-  if (!isPlaying || ['image', 'goto', 'pause', 'blackout', 'counter', 'transition', 'group', 'time', 'text', 'msc', 'osc', 'stop', 'conditional', 'timer'].includes(type)) return null;
+  if (!isPlaying || ['image', 'goto', 'pause', 'blackout', 'counter', 'transition', 'group', 'time', 'text', 'msc', 'osc', 'projector', 'stop', 'conditional', 'timer', 'memo', 'webhook'].includes(type)) return null;
   return (
     <div className="flex items-end gap-[2px] h-3 ml-3 shrink-0" title={isPaused ? "Audio Paused" : "Audio Playing"}>
       <div className="w-[3px] bg-green-500 rounded-t-sm origin-bottom" style={{ animation: `meter 0.4s ease-in-out infinite alternate ${isPaused ? 'paused' : 'running'}`, height: '100%' }} />
@@ -63,19 +63,38 @@ const CueRow = React.memo(({
       onContextMenu={(e) => handleContextMenu(e, cue.id)}
       draggable onDragStart={(e) => handleDragStart(e, cue.id)} onDragOver={(e) => handleDragOverCue(e, cue.id)}
       onDrop={(e) => handleDropCue(e, cue.id)} onDragEnd={handleDragEnd}
-      className={`flex items-center px-2 py-3 text-sm border-b cursor-pointer select-none transition-colors ${isSelected ? 'bg-blue-900/40 border-blue-800/50' : 'hover:bg-gray-800/50'} ${isPlaying ? 'text-green-400' : isStopping ? 'text-yellow-500' : 'text-gray-300'} ${cue.groupId ? 'border-l-2 border-l-gray-700 rounded-l-none bg-gray-950/30' : ''} ${draggedCueId === cue.id ? 'opacity-40 border-dashed' : ''} ${dragOverCueId === cue.id ? 'bg-blue-900/60 shadow-[inset_0_3px_0_#3b82f6]' : ''}`} 
+      title={cue.type === 'memo' && cue.description ? cue.description : undefined}
+      className={`flex items-center px-2 py-3 text-sm border-b cursor-pointer select-none transition-colors ${isSelected ? 'bg-blue-900/40 border-blue-800/50' : 'hover:bg-gray-800/50'} ${isPlaying ? 'text-green-400' : isStopping ? 'text-yellow-500' : 'text-gray-300'} ${cue.groupId ? 'border-l-2 border-l-gray-700 rounded-l-none bg-gray-950/30' : ''} ${draggedCueId === cue.id ? 'opacity-40 border-dashed' : ''} ${dragOverCueId === cue.id ? 'bg-blue-900/60 shadow-[inset_0_3px_0_#3b82f6]' : ''} ${
+        cue.type === 'memo' 
+          ? (cue.memoColor === 'red' 
+              ? 'bg-red-950/45 border-red-900/60 text-red-200 font-bold border-l-4 border-l-red-500' 
+              : cue.memoColor === 'orange' 
+                ? 'bg-orange-950/40 border-orange-900/50 text-orange-100 font-bold border-l-4 border-l-orange-500' 
+                : cue.memoColor === 'blue' 
+                  ? 'bg-blue-950/40 border-blue-900/50 text-blue-100 font-bold border-l-4 border-l-blue-500' 
+                  : cue.memoColor === 'green' 
+                    ? 'bg-green-950/40 border-green-900/50 text-green-100 font-bold border-l-4 border-l-green-500' 
+                    : 'bg-yellow-950/40 border-yellow-900/50 text-yellow-100 font-bold border-l-4 border-l-yellow-500') 
+          : ''
+      }`} 
       style={{ marginLeft: `${indentLevel * 24}px` }}
     >
       <div className="w-6 flex justify-center text-gray-600 cursor-grab"><GripVertical className="w-4 h-4" /></div>
       <div className="w-6 flex justify-center">{cue.type === 'group' ? (<button onClick={(e) => { e.stopPropagation(); setCues(prev => prev.map(c => c.id === cue.id ? {...c, isExpanded: !c.isExpanded} : c)); }} className="hover:text-white">{cue.isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</button>) : (isSelected && <ChevronRight className="w-4 h-4 text-blue-400" />)}</div>
       <div className="w-10 font-mono opacity-50 truncate">{cue.number}</div>
       <div className="w-10 flex items-center justify-center gap-1">
-        {cue.type === 'video' ? <Video className="w-4 h-4" /> : cue.type === 'image' ? <ImageIcon className="w-4 h-4" /> : cue.type === 'audio' ? <Music className="w-4 h-4" /> : cue.type === 'camera' ? <Camera className="w-4 h-4" /> : cue.type === 'blackout' ? <Moon className="w-4 h-4" /> : cue.type === 'pause' ? <PauseCircle className="w-4 h-4" /> : cue.type === 'counter' ? <Repeat className="w-4 h-4" /> : cue.type === 'transition' ? <Wand2 className="w-4 h-4 text-pink-500" /> : cue.type === 'group' ? (cue.isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />) : cue.type === 'time' ? <CalendarClock className="w-4 h-4 text-orange-400" /> : cue.type === 'text' ? <Type className="w-4 h-4 text-yellow-200" /> : cue.type === 'msc' ? <Settings2 className="w-4 h-4 text-purple-400" /> : cue.type === 'osc' ? <Wifi className="w-4 h-4 text-cyan-400" /> : cue.type === 'projector' ? <MonitorUp className="w-4 h-4 text-emerald-500" /> : cue.type === 'stop' ? <XSquare className="w-4 h-4 text-red-500" /> : cue.type === 'state-changer' ? <Key className="w-4 h-4 text-teal-500" /> : cue.type === 'conditional' ? <GitBranch className="w-4 h-4 text-emerald-400" /> : cue.type === 'timer' ? <Hourglass className="w-4 h-4 text-teal-400" /> : <CornerDownRight className="w-4 h-4 text-blue-400" />}
-        {cue.type !== 'goto' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'transition' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'msc' && cue.type !== 'osc' && cue.type !== 'projector' && cue.type !== 'stop' && cue.type !== 'state-changer' && cue.type !== 'conditional' && (cue.triggerBehavior === 'stop-others' ? <StopCircle className="w-3 h-3 text-red-500 opacity-60" /> : <Layers className="w-3 h-3 text-blue-500 opacity-60" />)}
+        {cue.type === 'video' ? <Video className="w-4 h-4" /> : cue.type === 'image' ? <ImageIcon className="w-4 h-4" /> : cue.type === 'audio' ? <Music className="w-4 h-4" /> : cue.type === 'camera' ? <Camera className="w-4 h-4" /> : cue.type === 'blackout' ? <Moon className="w-4 h-4" /> : cue.type === 'pause' ? <PauseCircle className="w-4 h-4" /> : cue.type === 'counter' ? <Repeat className="w-4 h-4" /> : cue.type === 'transition' ? <Wand2 className="w-4 h-4 text-pink-500" /> : cue.type === 'group' ? (cue.isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />) : cue.type === 'time' ? <CalendarClock className="w-4 h-4 text-orange-400" /> : cue.type === 'text' ? <Type className="w-4 h-4 text-yellow-200" /> : cue.type === 'msc' ? <Settings2 className="w-4 h-4 text-purple-400" /> : cue.type === 'osc' ? <Wifi className="w-4 h-4 text-cyan-400" /> : cue.type === 'projector' ? <MonitorUp className="w-4 h-4 text-emerald-500" /> : cue.type === 'stop' ? <XSquare className="w-4 h-4 text-red-500" /> : cue.type === 'state-changer' ? <Key className="w-4 h-4 text-teal-500" /> : cue.type === 'conditional' ? <GitBranch className="w-4 h-4 text-emerald-400" /> : cue.type === 'timer' ? <Hourglass className="w-4 h-4 text-teal-400" /> : cue.type === 'memo' ? <AlertCircle className={`w-4 h-4 ${cue.memoColor === 'red' ? 'text-red-400' : cue.memoColor === 'orange' ? 'text-orange-400' : cue.memoColor === 'blue' ? 'text-blue-400' : cue.memoColor === 'green' ? 'text-green-400' : 'text-yellow-400'}`} /> : cue.type === 'surtitle' ? <Languages className="w-4 h-4 text-emerald-300" /> : cue.type === 'webhook' ? <Globe className="w-4 h-4 text-emerald-400" /> : <CornerDownRight className="w-4 h-4 text-blue-400" />}
+        {cue.type !== 'goto' && cue.type !== 'pause' && cue.type !== 'counter' && cue.type !== 'transition' && cue.type !== 'group' && cue.type !== 'time' && cue.type !== 'msc' && cue.type !== 'osc' && cue.type !== 'projector' && cue.type !== 'stop' && cue.type !== 'state-changer' && cue.type !== 'conditional' && cue.type !== 'memo' && cue.type !== 'surtitle' && cue.type !== 'webhook' && (cue.triggerBehavior === 'stop-others' ? <StopCircle className="w-3 h-3 text-red-500 opacity-60" /> : <Layers className="w-3 h-3 text-blue-500 opacity-60" />)}
       </div>
       
       <div className={`flex-1 flex items-center font-medium truncate pr-2 ${cue.disabled ? 'opacity-50' : ''}`}>
         <span className={`${cue.type === 'group' ? 'font-bold text-blue-100' : ''} ${cue.disabled ? 'line-through' : ''}`}>{cue.name}</span>
+        
+        {cue.type === 'surtitle' && cue.surtitleLines && cue.surtitleLines.length > 0 && (
+          <span className="ml-2 text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded whitespace-nowrap animate-fade-in" title="Subtitle Line Progress">
+            {cue.currentLineIndex !== undefined && cue.currentLineIndex >= 0 ? `Line ${cue.currentLineIndex + 1}/${cue.surtitleLines.length}` : `Ready (${cue.surtitleLines.length} lines)`}
+          </span>
+        )}
         
         {/* FEEDBACK TAGS */}
         {(cue.type === 'video' || cue.type === 'audio') && (isPlaying || isStopping) && mediaTime && mediaTime.duration > 0 && (
@@ -113,7 +132,7 @@ const CueRow = React.memo(({
     </div>
   );
 }, (prev, next) => {
-  return prev.cue.id === next.cue.id && prev.cue.state === next.cue.state && prev.cue.name === next.cue.name && prev.cue.number === next.cue.number && prev.cue.disabled === next.cue.disabled && prev.cue.lockedBy === next.cue.lockedBy && prev.cue.cameraLive === next.cue.cameraLive && prev.cue.isExpanded === next.cue.isExpanded && prev.isSelected === next.isSelected && prev.isPlaying === next.isPlaying && prev.isStopping === next.isStopping && prev.draggedCueId === next.draggedCueId && prev.dragOverCueId === next.dragOverCueId && prev.mediaTime?.current === next.mediaTime?.current && prev.mediaTime?.duration === next.mediaTime?.duration && prev.isPaused === next.isPaused;
+  return prev.cue.id === next.cue.id && prev.cue.state === next.cue.state && prev.cue.name === next.cue.name && prev.cue.description === next.cue.description && prev.cue.number === next.cue.number && prev.cue.disabled === next.cue.disabled && prev.cue.lockedBy === next.cue.lockedBy && prev.cue.cameraLive === next.cue.cameraLive && prev.cue.isExpanded === next.cue.isExpanded && prev.cue.memoColor === next.cue.memoColor && prev.cue.currentLineIndex === next.cue.currentLineIndex && prev.cue.surtitleLines?.length === next.cue.surtitleLines?.length && prev.isSelected === next.isSelected && prev.isPlaying === next.isPlaying && prev.isStopping === next.isStopping && prev.draggedCueId === next.draggedCueId && prev.dragOverCueId === next.dragOverCueId && prev.mediaTime?.current === next.mediaTime?.current && prev.mediaTime?.duration === next.mediaTime?.duration && prev.isPaused === next.isPaused;
 });
 
 const CueList = React.memo(function CueList({

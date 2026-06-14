@@ -3,7 +3,6 @@ import dgram from 'dgram';
 class DMXEngine {
   constructor() {
     this.socket = null;
-    this.universeData = Buffer.alloc(512, 0); // 512 channels, defaults to 0
     this.fades = {}; // Tracks active running fades
     this.broadcastIp = '255.255.255.255';
     this.port = 6454; // Standard Art-Net UDP Port
@@ -15,6 +14,11 @@ class DMXEngine {
       0x41, 0x72, 0x74, 0x2d, 0x4e, 0x65, 0x74, 0x00, 
       0x00, 0x50, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00  
     ]);
+
+    // Pre-allocated packet buffer to avoid GC churn in the transmission loop
+    this.packet = Buffer.alloc(18 + 512, 0);
+    this.header.copy(this.packet, 0);
+    this.universeData = this.packet.subarray(18); // Shared memory view of the 512 channels
   }
 
   start(ip = '255.255.255.255') {
@@ -68,8 +72,7 @@ class DMXEngine {
         }
     }
 
-    const packet = Buffer.concat([this.header, this.universeData]);
-    this.socket.send(packet, 0, packet.length, this.port, this.broadcastIp);
+    this.socket.send(this.packet, 0, this.packet.length, this.port, this.broadcastIp);
   }
 }
 

@@ -114,7 +114,8 @@ const DEFAULT_FRAGMENT_SHADER = `
 
 const StagePreview = React.memo(function StagePreview({
   stageRef, activeMediaCues, pins, gridSize, stageSize, quadW, quadH,
-  isMappingMode, handlePinDrag, showStats, isRecording
+  isMappingMode, handlePinDrag, showStats, isRecording,
+  hardwareDisplays = [], previewDisplayFilter = 'all', setPreviewDisplayFilter
 }) {
   const quads = [];
   for (let y = 0; y < gridSize.y; y++) {
@@ -154,33 +155,76 @@ const StagePreview = React.memo(function StagePreview({
   };
 
   useEffect(() => {
-    const { ipcRenderer } = window.require('electron');
-    
-    const handleShaderRegistration = (event, { pluginId, shaderConfig }) => {
-        console.log(`[StagePreview] Compiling new shader from ${pluginId}`);
-        // shaderConfig should contain { id: string, fragmentSource: string }
-        setCustomShaders(prev => {
-            // Delete the old cached program so the engine is forced to recompile the new GLSL
-            if (programCache.current[shaderConfig.id]) {
-                delete programCache.current[shaderConfig.id];
-            }
-            return {
-                ...prev,
-                [shaderConfig.id]: shaderConfig.fragmentSource
-            };
-        });
-    };
+    try {
+      const { ipcRenderer } = window.require('electron');
+      
+      const handleShaderRegistration = (event, { pluginId, shaderConfig }) => {
+          console.log(`[StagePreview] Compiling new shader from ${pluginId}`);
+          // shaderConfig should contain { id: string, fragmentSource: string }
+          setCustomShaders(prev => {
+              // Delete the old cached program so the engine is forced to recompile the new GLSL
+              if (programCache.current[shaderConfig.id]) {
+                  delete programCache.current[shaderConfig.id];
+              }
+              return {
+                  ...prev,
+                  [shaderConfig.id]: shaderConfig.fragmentSource
+              };
+          });
+      };
 
-    ipcRenderer.on('tuxshow:shader-registered', handleShaderRegistration);
+      ipcRenderer.on('tuxshow:shader-registered', handleShaderRegistration);
 
-    return () => {
-        ipcRenderer.removeListener('tuxshow:shader-registered', handleShaderRegistration);
-    };
+      return () => {
+          ipcRenderer.removeListener('tuxshow:shader-registered', handleShaderRegistration);
+      };
+    } catch (e) {
+      console.warn("[StagePreview] Running in browser mode or Electron IPC unavailable");
+    }
   }, []);
 
   return (
-    <div className="flex-1 relative bg-gray-950 flex items-center justify-center p-8 overflow-hidden" style={{ backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)', backgroundSize: '30px 30px', backgroundPosition: 'center center' }}>
-      <div className="relative bg-black shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-gray-700 w-full max-w-4xl aspect-video overflow-hidden ring-1 ring-black">
+    <div className="flex-1 flex flex-col bg-gray-950 overflow-hidden">
+      {hardwareDisplays && hardwareDisplays.length >= 2 && (
+        <div className="flex items-center gap-1.5 bg-gray-900/40 border-b border-gray-800 px-4 py-2 shrink-0 z-20 overflow-x-auto select-none custom-scrollbar">
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mr-2">Preview Output:</span>
+          <button
+            onClick={() => setPreviewDisplayFilter('all')}
+            className={`px-3 py-1 rounded text-xs font-semibold font-mono tracking-wide transition-all border ${
+              previewDisplayFilter === 'all'
+                ? 'bg-blue-600/20 border-blue-500/40 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
+                : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-800/30'
+            }`}
+          >
+            Composite (All)
+          </button>
+          {hardwareDisplays.map((display, idx) => (
+            <button
+              key={display.id}
+              onClick={() => setPreviewDisplayFilter(display.id)}
+              className={`px-3 py-1 rounded text-xs font-semibold font-mono tracking-wide transition-all border ${
+                previewDisplayFilter === display.id
+                  ? 'bg-blue-600/20 border-blue-500/40 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
+                  : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-800/30'
+              }`}
+            >
+              {display.label || `Display ${idx + 1}`}
+            </button>
+          ))}
+          <button
+            onClick={() => setPreviewDisplayFilter('webrtc')}
+            className={`px-3 py-1 rounded text-xs font-semibold font-mono tracking-wide transition-all border ${
+              previewDisplayFilter === 'webrtc'
+                ? 'bg-blue-600/20 border-blue-500/40 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
+                : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-800/30'
+            }`}
+          >
+            WebRTC (Virtual)
+          </button>
+        </div>
+      )}
+      <div className="flex-1 relative flex items-center justify-center p-8 overflow-hidden" style={{ backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)', backgroundSize: '30px 30px', backgroundPosition: 'center center' }}>
+        <div className="relative bg-black shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-gray-700 w-full max-w-4xl aspect-video overflow-hidden ring-1 ring-black">
         <div className="absolute inset-0 bg-gray-900/20 z-0" />
         {activeMediaCues.filter(c => !['goto','pause','counter','group','time','msc','osc','stop','conditional'].includes(c.type) && !c.disabled).length === 0 && <div className="absolute inset-0 flex items-center justify-center text-gray-500 font-mono tracking-widest pointer-events-none uppercase text-xs z-0">Stage Preview</div>}
         
@@ -194,6 +238,7 @@ const StagePreview = React.memo(function StagePreview({
         </div>
         {isMappingMode && pins.map((pin, i) => (<div key={i} className="absolute w-6 h-6 -ml-3 -mt-3 bg-white border-2 border-blue-500 rounded-full shadow-lg cursor-move z-50 flex items-center justify-center hover:scale-125 transition-transform" style={{ left: pin.x * stageSize.w, top: pin.y * stageSize.h }} onPointerDown={(e) => { e.target.setPointerCapture(e.pointerId); const onMove = (moveEvt) => handlePinDrag(i, moveEvt); const onUp = () => { e.target.releasePointerCapture(e.pointerId); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); }} ><div className="w-2 h-2 bg-blue-500 rounded-full"/></div>))}
         {showStats && (<div className="absolute top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">{activeMediaCues.filter(c => c.type === 'video' || c.type === 'camera').map(cue => (<VideoStats key={`stats-${cue.id}`} videoId={`master-vid-${cue.id}`} name={cue.name} />))}</div>)}
+        </div>
       </div>
     </div>
   );

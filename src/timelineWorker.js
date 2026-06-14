@@ -9,15 +9,16 @@ let oscValues = {};
 let trackers = {};
 let mainThreadTimeOffset = 0;
 let sequenceTimers = {}; // NEW: Tracks active sequence containers
+let hadActiveAnimates = false;
 
 const evaluateCue = (cueId, currentCues, depth = 0) => {
     if (depth > 10) return [];
-    const cue = currentCues.find(c => c.id === cueId);
+    const cue = currentCues.find(c => String(c.id) === String(cueId));
     if (!cue || cue.disabled) return [];
 
     if ((cue.type === 'audio' || cue.type === 'image') && cue.groupId && cue.state === 'playing') {
-        const siblings = currentCues.filter(c => c.groupId === cue.groupId);
-        const myIndex = siblings.findIndex(c => c.id === cue.id);
+        const siblings = currentCues.filter(c => String(c.groupId) === String(cue.groupId));
+        const myIndex = siblings.findIndex(c => String(c.id) === String(cue.id));
         const nextNonPlaying = siblings.slice(myIndex + 1).find(c => c.state !== 'playing');
         if (nextNonPlaying) return evaluateCue(nextNonPlaying.id, currentCues, depth + 1);
         return [];
@@ -47,7 +48,7 @@ const evaluateCue = (cueId, currentCues, depth = 0) => {
         return nextCue ? evaluateCue(nextCue.id, currentCues, depth + 1) : [];
     }
     if (cue.type === 'group') {
-        const children = currentCues.filter(c => c.groupId === cue.id); if (children.length === 0) return [cue];
+        const children = currentCues.filter(c => String(c.groupId) === String(cue.id)); if (children.length === 0) return [cue];
         if (cue.groupMode === 'fire-first') return [cue, ...evaluateCue(children[0].id, currentCues, depth + 1)];
         else return [cue, ...children.flatMap(child => evaluateCue(child.id, currentCues, depth + 1))];
     }
@@ -73,7 +74,7 @@ self.onmessage = (e) => {
             
             if (Array.isArray(targetIds)) {
                 targetIds.forEach(id => {
-                    const cue = cues.find(c => c.id === id);
+                    const cue = cues.find(c => String(c.id) === String(id));
                     if (cue && cue.type === 'counter') {
                         const current = (mutations[cue.id]?.counterCurrent ?? cue.counterCurrent) || 0;
                         if (current + 1 >= (cue.counterLimit || 1)) {
@@ -128,7 +129,7 @@ setInterval(() => {
             mutations[cue.id] = { state: 'stopped' };
             
             // NEW: Eagerly mutate local cue state
-            const localCue = cues.find(c => c.id === cue.id);
+            const localCue = cues.find(c => String(c.id) === String(cue.id));
             if (localCue) localCue.state = 'stopped';
             
             if (cue.trueTargetCue) {
@@ -148,13 +149,21 @@ setInterval(() => {
 
 // --- 60Hz MATH & TWEENING ENGINE ---
 setInterval(() => {
-    const activeAnimates = cues.filter(c => c.type === 'animate' && (c.state === 'playing' || c.state === 'completed'));
+    const activeAnimates = [];
+    const activeSequences = [];
+    for (let i = 0; i < cues.length; i++) {
+        const c = cues[i];
+        if (c.type === 'animate' && (c.state === 'playing' || c.state === 'completed')) {
+            activeAnimates.push(c);
+        } else if (c.type === 'sequence' && c.state === 'playing') {
+            activeSequences.push(c);
+        }
+    }
 
     const animModifiers = {};
     const localNow = performance.now();
     
     const mainThreadNow = localNow - mainThreadTimeOffset;
-    const activeSequences = cues.filter(c => c.type === 'sequence' && c.state === 'playing');
     const seqFires = [];
     const seqMutations = {};
 
@@ -198,7 +207,7 @@ setInterval(() => {
 
     // Garbage collection for paused/stopped sequences
     Object.keys(sequenceTimers).forEach(seqId => {
-        if (!activeSequences.find(c => c.id === seqId)) delete sequenceTimers[seqId];
+        if (!activeSequences.find(c => String(c.id) === String(seqId))) delete sequenceTimers[seqId];
     });
 
     // Fire any resolved children over the message bridge
@@ -223,5 +232,11 @@ setInterval(() => {
         }
     });
     
-    self.postMessage({ type: 'ANIMATION_TICK', payload: animModifiers });
+    if (activeAnimates.length > 0) {
+        self.postMessage({ type: 'ANIMATION_TICK', payload: animModifiers });
+        hadActiveAnimates = true;
+    } else if (hadActiveAnimates) {
+        self.postMessage({ type: 'ANIMATION_TICK', payload: {} });
+        hadActiveAnimates = false;
+    }
 }, 16);

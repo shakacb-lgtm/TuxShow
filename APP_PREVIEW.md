@@ -272,3 +272,20 @@
 ---
 
 **This is a professional, QLab-inspired show control software with advanced projection mapping, hardware control, and real-time rendering capabilities entirely in React/Electron.**
+
+## Planned Future Cue Types (Whiteboard & Roadmap)
+
+These high-priority cue types are planned for future pipeline implementation to support novice operators and enhance accessibility in live theatrical environments:
+
+### 1. The "Memo" or "Operator Note" Cue
+- **Function**: A purely organizational, non-executable cue.
+- **Behavior**: When triggered, it does nothing to the engine. Its sole purpose is to display a highly visible, color-coded text block (e.g., yellow/red) directly in the UI's Cue List to serve as a visual warning, cue line, or standby note for the board operator.
+
+### 2. The Dynamic Surtitle / Caption Cue
+- **Function**: An accessibility-focused text cue.
+- **Behavior**: Ingests and parses standard subtitle files (`.srt`, `.vtt`, or `.csv`). Each subsequent press of the master "GO" button reads the next sequential line from the file and crossfades the text onto the WebGL canvas, eliminating the need to manually build hundreds of individual text cues for translated or captioned performances.
+
+### 3. The IoT Webhook / HTTP Request Cue
+- **Function**: A local network integration cue for consumer electronics.
+- **Behavior**: Fires customizable HTTP requests (GET, POST, PUT) to local IP addresses on the production network. This allows the timeline to directly trigger practical onstage devices like Wi-Fi smart plugs, relays, or Philips Hue bulbs in sync with audio and video.
+

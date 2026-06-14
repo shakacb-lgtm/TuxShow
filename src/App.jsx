@@ -3,7 +3,7 @@ import {
   Play, Square, Video, Music, ChevronRight, ChevronDown, Plus, Trash2, 
   ArrowRight, Layers, StopCircle, GripVertical, Image as ImageIcon, FolderOpen, 
   Folder, Camera, Moon, PauseCircle, Search, Repeat, CalendarClock, Type, 
-  Settings2, Wifi, CornerDownRight, FolderPlus, AlertCircle, Pause, Hash, 
+  Settings2, Wifi, CornerDownRight, FolderPlus, AlertCircle, AlertTriangle, Pause, Hash, 
   Settings, FilePlus, Save, RotateCcw, Grid3X3, Activity, Crosshair, 
   MonitorDown, MonitorUp, Edit3, Crop, Wand2, XSquare, Bold, Italic, Cast, 
   X, Check, Archive, RefreshCw, Maximize, Move, GitBranch, Hourglass, 
@@ -40,6 +40,50 @@ const getNativeFilePath = (file) => {
     if (nativePath) return `file://${nativePath.replace(/#/g, '%23').replace(/\?/g, '%3F')}`;
   } catch (e) {}
   return file.path ? `file://${file.path.replace(/#/g, '%23').replace(/\?/g, '%3F')}` : URL.createObjectURL(file);
+};
+
+// ============================================================================
+// MASTER CANVAS GRAPHICS DRAW HELPER (OPTIMIZED)
+// ============================================================================
+const drawCueToCtx = (ctx, imageToDraw, cue, sx, sy, sw, sh, dx, dy, dw, dh) => {
+  if (cue.warpEnabled && cue.warpPins) {
+    const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[3].x, pts[3].y);
+    ctx.closePath(); ctx.clip();
+    applyCanvasAffine(ctx, dw, dh, pts[0], pts[1], pts[3], 1);
+    ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y);
+    ctx.closePath(); ctx.clip();
+    applyCanvasAffine(ctx, dw, dh, pts[1], pts[2], pts[3], 2);
+    ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(imageToDraw, sx, sy, sw, sh, dx, dy, dw, dh);
+  }
+  
+  ctx.filter = 'none'; // Ensure outline isn't color filtered
+
+  if (cue.outlineEnabled) {
+    ctx.save();
+    if (cue.warpEnabled && cue.warpPins) {
+         const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
+         ctx.beginPath();
+         ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); ctx.closePath();
+    } else {
+         ctx.beginPath();
+         ctx.rect(dx, dy, dw, dh);
+    }
+    ctx.strokeStyle = cue.outlineColor || '#ffffff';
+    ctx.lineWidth = cue.outlineWidth || 2;
+    ctx.stroke();
+    ctx.restore();
+  }
 };
 
 // ============================================================================
@@ -322,7 +366,7 @@ const CameraMasterPlayer = React.memo(({ cue, isPaused }) => {
     }
   }, [isPaused]);
 
-  return <video id={`master-cam-${cue.id}`} ref={videoRef} autoPlay playsInline muted crossOrigin="anonymous" className="hidden" />;
+  return <video id={`master-cam-${cue.id}`} ref={videoRef} autoPlay playsInline muted className="hidden" onError={(e) => console.error(`[CameraLoader] Failed to load camera feed for cue ${cue.id}`, e)} />;
 });
 
 const ChromaKeyFilter = React.memo(({ cue }) => {
@@ -584,6 +628,98 @@ const TimerMasterPlayer = React.memo(({ cue, fadeStateTrackers }) => {
   return <canvas id={`master-timer-${cue.id}`} ref={canvasRef} className="hidden" />;
 });
 
+const SurtitleMasterPlayer = React.memo(({ cue }) => {
+  const canvasRef = useRef(null);
+  const lastIndexRef = useRef(-2);
+  const transitionStartRef = useRef(0);
+  const prevTextRef = useRef('');
+  const currentTextRef = useRef('');
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext('2d'); const w = 1920; const h = 1080; 
+    let animId;
+
+    const render = () => {
+      canvas.width = w; canvas.height = h; 
+      ctx.clearRect(0, 0, w, h);
+
+      const lines = cue.surtitleLines || [];
+      const currentIndex = cue.currentLineIndex ?? -1;
+
+      if (lastIndexRef.current !== currentIndex) {
+        const oldText = lastIndexRef.current >= 0 && lastIndexRef.current < lines.length ? lines[lastIndexRef.current] : '';
+        const newText = currentIndex >= 0 && currentIndex < lines.length ? lines[currentIndex] : '';
+        prevTextRef.current = oldText;
+        currentTextRef.current = newText;
+        transitionStartRef.current = performance.now();
+        lastIndexRef.current = currentIndex;
+      }
+
+      const durationMs = (cue.duration || 0.5) * 1000;
+      const elapsed = performance.now() - transitionStartRef.current;
+      const progress = durationMs > 0 ? Math.min(1, elapsed / durationMs) : 1;
+
+      ctx.imageSmoothingEnabled = cue.textSmoothing !== false; 
+      ctx.fillStyle = cue.textColor || '#ffffff';
+      const align = cue.textAlign || 'center'; 
+      ctx.textAlign = align; 
+      ctx.textBaseline = 'middle';
+      const fontSize = (cue.textScale || 100); 
+      const weight = cue.fontWeight || 'bold'; 
+      const style = cue.fontStyle || 'normal'; 
+      const family = cue.fontFamily || 'sans-serif';
+      ctx.font = `${style} ${weight} ${fontSize}px ${family}`;
+
+      const drawTextBlock = (text, alpha) => {
+        if (!text) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        if (cue.textShadowEnabled) {
+          ctx.shadowColor = cue.textShadowColor || '#000000';
+          ctx.shadowBlur = cue.textShadowBlur !== undefined ? cue.textShadowBlur : 15;
+          ctx.shadowOffsetX = cue.textShadowOffsetX !== undefined ? cue.textShadowOffsetX : 5;
+          ctx.shadowOffsetY = cue.textShadowOffsetY !== undefined ? cue.textShadowOffsetY : 5;
+        } else {
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+        }
+
+        const splitLines = text.split('\n');
+        const lineHeight = fontSize * 1.2;
+        const totalHeight = lineHeight * splitLines.length;
+
+        let startY = (h * (cue.textY !== undefined ? cue.textY : 85) / 100) - (totalHeight / 2) + (lineHeight / 2);
+        let startX = (w * (cue.textX !== undefined ? cue.textX : 50) / 100);
+        if (align === 'left') startX = (w * (cue.textX !== undefined ? cue.textX : 5) / 100);
+        if (align === 'right') startX = (w * (cue.textX !== undefined ? cue.textX : 95) / 100);
+
+        splitLines.forEach(lineStr => {
+          ctx.fillText(lineStr, startX, startY);
+          startY += lineHeight;
+        });
+        ctx.restore();
+      };
+
+      if (progress < 1 && prevTextRef.current) {
+        drawTextBlock(prevTextRef.current, 1 - progress);
+      }
+      if (currentTextRef.current) {
+        drawTextBlock(currentTextRef.current, progress);
+      }
+
+      animId = requestAnimationFrame(render);
+    };
+
+    render();
+    return () => cancelAnimationFrame(animId);
+  }, [cue]);
+
+  return <canvas id={`master-surtitle-${cue.id}`} ref={canvasRef} className="hidden" />;
+});
+
 const Header = React.memo(function Header({
   setShowSettingsModal, gpuStatus, setShowNewModal, fileInputRef, folderInputRef, 
   handleSaveShow, handleLoadShow, handleAddFolder, selectedCueIds, cues, 
@@ -608,7 +744,7 @@ const Header = React.memo(function Header({
         </button>
         <div className="flex flex-col">
           <h1 className="font-bold tracking-widest text-gray-200 leading-tight uppercase">
-            TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control <span className="text-[10px] font-mono text-blue-500 ml-1">v1.4.0</span></span>
+            TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control <span className="text-[10px] font-mono text-blue-500 ml-1">v1.5.0</span></span>
           </h1>
           <span className="text-[9px] text-blue-400/80 font-mono tracking-widest uppercase mt-0.5">{String(gpuStatus)}</span>
         </div>
@@ -669,7 +805,7 @@ const Header = React.memo(function Header({
   );
 });
 
-const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig, ioConfig, setShowQrModal, masterVolumeUI, handleMasterVolumeSlider, performanceTier, syncMode }) {
+const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig, ioConfig, setShowQrModal, masterVolumeUI, handleMasterVolumeSlider, performanceTier, syncMode, syncActive }) {
   return (
     <div className="bg-gray-950 border-t border-gray-800 px-4 py-1.5 flex justify-between items-center text-[10px] font-mono tracking-widest text-gray-500 shrink-0 z-50">
       <div className="flex items-center gap-4">
@@ -703,12 +839,33 @@ const StatusBar = React.memo(function StatusBar({ localIp, virtualDisplayConfig,
         )}
 
         {syncMode && syncMode !== 'standalone' && (
-            <div title={syncMode === 'master' ? "Broadcasting state to backups" : "Slaved to Master timeline"} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider border cursor-help ${
-                syncMode === 'master' ? 'bg-blue-900/30 text-blue-400 border-blue-800' :
-                'bg-orange-900/30 text-orange-400 border-orange-800'
-            }`}>
-                <Database className="w-3 h-3" />
-                <span>{syncMode}</span>
+            <div 
+                title={
+                    syncMode === 'master' ? "Broadcasting state to backups" : 
+                    syncActive ? "Successfully synchronized with Master" : "Disconnected: No heartbeat from Master"
+                } 
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider border cursor-help transition-colors duration-300 ${
+                    syncMode === 'master' ? 'bg-blue-900/30 text-blue-400 border-blue-800' :
+                    syncActive ? 'bg-green-900/30 text-green-400 border-green-800' :
+                    'bg-red-900/30 text-red-400 border-red-800'
+                }`}
+            >
+                {syncMode === 'master' ? (
+                    <>
+                        <Database className="w-3 h-3" />
+                        <span>{syncMode}</span>
+                    </>
+                ) : syncActive ? (
+                    <>
+                        <Check className="w-3 h-3" />
+                        <span>{syncMode}: Synced</span>
+                    </>
+                ) : (
+                    <>
+                        <X className="w-3 h-3 text-red-500" />
+                        <span>{syncMode}: Offline</span>
+                    </>
+                )}
             </div>
         )}
 
@@ -814,7 +971,7 @@ const DedicatedReceiver = React.memo(({ url }) => {
 
   return (
     <div className="w-screen h-screen bg-black overflow-hidden relative cursor-none flex items-center justify-center">
-      <video ref={videoRef} autoPlay playsInline muted crossOrigin="anonymous" className="absolute inset-0 w-full h-full object-contain" />
+      <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-contain" onError={(e) => console.error(`[WebRTCLoader] Failed to load stream from ${url}`, e)} />
       
       {!isConnected && url.startsWith('webrtc://') && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 text-gray-400">
@@ -884,6 +1041,12 @@ export default function App() {
     activeCuesRef.current = cues.filter(c => c.state === 'playing' || c.state === 'stopping' || (c.state === 'completed' && c.holdAtEnd));
   }, [cues]);
 
+  const [previewDisplayFilter, setPreviewDisplayFilter] = useState('all');
+  const previewDisplayFilterRef = useRef('all');
+  useEffect(() => {
+    previewDisplayFilterRef.current = previewDisplayFilter;
+  }, [previewDisplayFilter]);
+
   const advanceTimers = useRef({}); 
   const fadeIntervals = useRef({});
   const syncTimers = useRef({});
@@ -946,7 +1109,18 @@ export default function App() {
                 let nextCues = [...prev];
                 
                 if (Object.keys(mutations).length > 0) {
-                    nextCues = nextCues.map(c => mutations[c.id] ? { ...c, ...mutations[c.id] } : c);
+                    nextCues = nextCues.map(c => {
+                        if (mutations[c.id]) {
+                            const updated = { ...c, ...mutations[c.id] };
+                            if (updated.type === 'surtitle' && mutations[c.id].state === 'playing') {
+                                if (updated.currentLineIndex === undefined || updated.currentLineIndex < 0) {
+                                    updated.currentLineIndex = 0;
+                                }
+                            }
+                            return updated;
+                        }
+                        return c;
+                    });
                 }
 
                 if (resolvedChildren && resolvedChildren.length > 0) {
@@ -966,7 +1140,7 @@ export default function App() {
             // 2. Fire the hardware action cues instantly on the UI thread over IPC
             if (resolvedChildren && resolvedChildren.length > 0) {
                 resolvedChildren.forEach(childCue => {
-                    if (['osc', 'projector', 'dmx'].includes(childCue.type)) {
+                    if (['osc', 'projector', 'dmx', 'webhook'].includes(childCue.type)) {
                         console.log(`[Hybrid Timeline] Firing synthetic hardware child:`, childCue.id);
                         try {
                             const { ipcRenderer } = window.require('electron');
@@ -976,9 +1150,26 @@ export default function App() {
                                 ipcRenderer.send('fire-projector-cue', { ip: childCue.projectorIp, port: childCue.projectorPort, protocol: childCue.projectorProtocol, payload: childCue.projectorPayload, password: childCue.projectorPassword });
                             } else if (childCue.type === 'dmx') {
                                 ipcRenderer.send('fire-dmx-cue', { channel: childCue.dmxChannel, endValue: childCue.dmxEndValue, duration: childCue.duration });
+                            } else if (childCue.type === 'webhook') {
+                                ipcRenderer.send('fire-webhook-cue', { url: childCue.webhookUrl, method: childCue.webhookMethod, headers: childCue.webhookHeaders, body: childCue.webhookBody });
                             }
                         } catch(e) {
                             console.error("[Hybrid Timeline] IPC Error:", e);
+                            if (childCue.type === 'webhook') {
+                                // Direct browser fetch fallback
+                                const parsedHeaders = {};
+                                if (childCue.webhookHeaders) {
+                                    try { Object.assign(parsedHeaders, typeof childCue.webhookHeaders === 'string' ? JSON.parse(childCue.webhookHeaders) : childCue.webhookHeaders); } catch(err) {}
+                                }
+                                if (childCue.webhookBody && !parsedHeaders['Content-Type'] && !parsedHeaders['content-type']) {
+                                    try { JSON.parse(childCue.webhookBody); parsedHeaders['Content-Type'] = 'application/json'; } catch(err) {}
+                                }
+                                fetch(childCue.webhookUrl, {
+                                    method: childCue.webhookMethod || 'GET',
+                                    headers: parsedHeaders,
+                                    body: ['POST', 'PUT', 'PATCH'].includes(childCue.webhookMethod) ? childCue.webhookBody : undefined
+                                }).catch(err => console.error("Web fallback fetch error:", err));
+                            }
                         }
                     }
                 });
@@ -1027,7 +1218,15 @@ export default function App() {
                     });
 
                     nextCues = nextCues.map(c => {
-                        if (resolvedIds.includes(c.id)) return { ...c, state: 'playing', triggerTime: Date.now() };
+                        if (resolvedIds.includes(c.id)) {
+                            const updated = { ...c, state: 'playing', triggerTime: Date.now() };
+                            if (c.type === 'surtitle') {
+                                if (updated.currentLineIndex === undefined || updated.currentLineIndex < 0) {
+                                    updated.currentLineIndex = 0;
+                                }
+                            }
+                            return updated;
+                        }
                         if (hasHardStop && !resolvedIds.includes(c.id) && (c.state === 'playing' || (c.state === 'completed' && c.holdAtEnd)) && !c.lockedBy) return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' };
                         if (fadeOutIds.includes(c.id) && (c.state === 'playing' || (c.state === 'completed' && c.holdAtEnd)) && !c.lockedBy) return { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' };
                         return c;
@@ -1072,7 +1271,10 @@ export default function App() {
               const script = document.createElement('script');
               script.id = scriptId;
               script.type = 'module';
-              const scriptPath = `file://${plugin.dir}/${plugin.entryPoints.ui}`.replace(/\\/g, '/');
+              const isBrowser = !window.require;
+              const scriptPath = (isBrowser || plugin.dir.startsWith('/'))
+                ? `${plugin.dir}/${plugin.entryPoints.ui}`
+                : `file://${plugin.dir}/${plugin.entryPoints.ui}`.replace(/\\/g, '/');
               script.src = scriptPath;
               script.onload = () => console.log(`[Plugin System] Successfully injected UI script for ${plugin.id}`);
               script.onerror = (e) => console.error(`[Plugin System] Failed to load UI script for ${plugin.id} at ${scriptPath}`, e);
@@ -1095,6 +1297,19 @@ export default function App() {
   const autoScrollRef = useRef(true);
   useEffect(() => { autoScrollRef.current = autoScroll; }, [autoScroll]);
 
+  const [toast, setToast] = useState(null);
+  const showToast = useCallback((message, type = 'danger') => {
+    setToast({ message, type });
+  }, []);
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const lastSurtitleTimerFireRef = useRef(0);
+
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const recordingStartTimeRef = useRef(0);
@@ -1110,15 +1325,23 @@ export default function App() {
         const filePath = await window.coreAppAPI.chooseRecordDestination();
         if (!filePath) return;
         
+        // Ensure AudioContext is initialized/resumed on user action
+        initAudioContext();
+        
         const canvasStream = masterCanvasRef.current.captureStream(60);
         const videoTrack = canvasStream.getVideoTracks()[0];
         
-        // NOTE TO AI: The app currently uses discrete <audio> and <video> elements rather than a 
-        // global AudioContext destination for the WebRTC feed. To capture mixed audio, we would 
-        // need to initialize a WebAudio AudioContext and route all media elements to a 
-        // MediaStreamAudioDestinationNode. For now, recording video only.
-        const streamToRecord = new MediaStream([videoTrack]);
-        // Let the browser choose the optimal WebM codec (usually VP8 or VP9) to prevent NotSupportedError
+        const tracks = [videoTrack];
+        if (recAudioDestRef.current) {
+          const audioTracks = recAudioDestRef.current.stream.getAudioTracks();
+          if (audioTracks && audioTracks.length > 0) {
+            tracks.push(audioTracks[0]);
+            console.log('[TuxShow] Recording audio track added:', audioTracks[0]);
+          }
+        }
+        
+        const streamToRecord = new MediaStream(tracks);
+        // Let the browser choose the optimal WebM codec (usually VP8/VP9 with Opus)
         const options = { mimeType: 'video/webm' };
         const recorder = new MediaRecorder(streamToRecord, options);
         
@@ -1289,15 +1512,131 @@ export default function App() {
   const [audioOutputDeviceId, setAudioOutputDeviceId] = useState(() => { try { return localStorage.getItem('tuxshow_audio_out') || 'default'; } catch(e) { return 'default'; } });
   const [enableLocalAudio, setEnableLocalAudio] = useState(() => { try { return localStorage.getItem('tuxshow_local_audio') === 'true'; } catch(e) { return false; } });
   
+  // Web Audio API components for mixed audio recording and local speaker playback
+  const audioContextRef = useRef(null);
+  const localGainNodeRef = useRef(null);
+  const recAudioDestRef = useRef(null);
+  const projectorActiveRef = useRef(false);
+  const enableLocalAudioRef = useRef(false);
+
+  useEffect(() => {
+    projectorActiveRef.current = projectorActive;
+    if (localGainNodeRef.current) {
+      localGainNodeRef.current.gain.value = (projectorActive || enableLocalAudioRef.current) ? 1.0 : 0.0;
+    }
+  }, [projectorActive]);
+
+  useEffect(() => {
+    enableLocalAudioRef.current = enableLocalAudio;
+    if (localGainNodeRef.current) {
+      localGainNodeRef.current.gain.value = (projectorActiveRef.current || enableLocalAudio) ? 1.0 : 0.0;
+    }
+  }, [enableLocalAudio]);
+
+  const initAudioContext = useCallback(() => {
+    if (isProjector) return;
+    if (!audioContextRef.current) {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContextClass();
+        audioContextRef.current = ctx;
+        
+        // Create local gain node for speakers
+        const localGain = ctx.createGain();
+        localGain.gain.value = (projectorActiveRef.current || enableLocalAudioRef.current) ? 1.0 : 0.0;
+        localGain.connect(ctx.destination);
+        localGainNodeRef.current = localGain;
+        
+        // Create destination for WebM recorder
+        const recDest = ctx.createMediaStreamDestination();
+        recAudioDestRef.current = recDest;
+        
+        if (typeof ctx.setSinkId === 'function') {
+          const targetSinkId = audioOutputDeviceId === 'default' ? '' : audioOutputDeviceId;
+          ctx.setSinkId(targetSinkId).catch(console.warn);
+        }
+        console.log('[TuxShow] AudioContext successfully initialized.');
+      } catch (err) {
+        console.error('[TuxShow] Failed to initialize AudioContext:', err);
+      }
+    }
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(err => console.error('[TuxShow] Failed to resume AudioContext:', err));
+    }
+  }, [audioOutputDeviceId, isProjector]);
+
+  useEffect(() => {
+    if (audioContextRef.current && typeof audioContextRef.current.setSinkId === 'function') {
+      const targetSinkId = audioOutputDeviceId === 'default' ? '' : audioOutputDeviceId;
+      audioContextRef.current.setSinkId(targetSinkId).catch(console.warn);
+    }
+  }, [audioOutputDeviceId]);
+
+  const routeElementAudio = useCallback((el) => {
+    if (!el || isProjector) return;
+    initAudioContext();
+    if (audioContextRef.current && !el.__audioRouted) {
+      try {
+        const source = audioContextRef.current.createMediaElementSource(el);
+        if (localGainNodeRef.current) {
+          source.connect(localGainNodeRef.current);
+        } else {
+          source.connect(audioContextRef.current.destination);
+        }
+        if (recAudioDestRef.current) {
+          source.connect(recAudioDestRef.current);
+        }
+        el.__audioRouted = true;
+        console.log('[TuxShow] Routed audio element:', el.id);
+      } catch (e) {
+        console.warn('[TuxShow] Failed to route audio for element:', el.id, e);
+      }
+    }
+  }, [initAudioContext, isProjector]);
+  
   const [hardwareDisplays, setHardwareDisplays] = useState([]);
   const [selectedDisplays, setSelectedDisplays] = useState(() => { try { const saved = localStorage.getItem('tuxshow_displays'); return saved ? JSON.parse(saved) : []; } catch(e) { return []; } });
   const [ioConfig, setIoConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_io_config'); return saved ? JSON.parse(saved) : { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } catch(e) { return { oscInput: false, oscPort: 53000, mscInput: false, mscDevice: '0' }; } });
   const [virtualDisplayConfig, setVirtualDisplayConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_virtual_display'); return saved ? JSON.parse(saved) : { enabled: false, port: 8554, path: '/display1' }; } catch(e) { return { enabled: false, port: 8554, path: '/display1' }; } });
   const [receiverConfig, setReceiverConfig] = useState(() => { try { const saved = localStorage.getItem('tuxshow_receiver_config'); return saved ? JSON.parse(saved) : { enabled: false, url: '', displayId: 'primary' }; } catch(e) { return { enabled: false, url: '', displayId: 'primary' }; } });
+  const [settingsTab, setSettingsTab] = useState('routing');
+  const [debugMode, setDebugMode] = useState(() => {
+      try { return localStorage.getItem('tuxshow_debug_mode') === 'true'; }
+      catch (e) { return false; }
+  });
+  const [diagnostics, setDiagnostics] = useState(null);
+
+  useEffect(() => {
+      localStorage.setItem('tuxshow_debug_mode', debugMode.toString());
+  }, [debugMode]);
+
+  useEffect(() => {
+      if (!showSettingsModal || settingsTab !== 'diagnostics') return;
+      
+      const fetchDiagnostics = async () => {
+          if (window.coreAppAPI && window.coreAppAPI.getDebugDiagnostics) {
+              const res = await window.coreAppAPI.getDebugDiagnostics();
+              if (res && res.success) {
+                  setDiagnostics(res);
+              }
+          }
+      };
+      
+      fetchDiagnostics();
+      const intervalId = setInterval(fetchDiagnostics, 1000);
+      return () => clearInterval(intervalId);
+  }, [showSettingsModal, settingsTab]);
+
   const [syncMode, setSyncMode] = useState(() => { 
       try { return localStorage.getItem('tuxshow_sync_mode') || 'standalone'; } 
       catch(e) { return 'standalone'; } 
   });
+  const [backupIp, setBackupIp] = useState(() => {
+      try { return localStorage.getItem('tuxshow_backup_ip') || ''; }
+      catch(e) { return ''; }
+  });
+  const [syncActive, setSyncActive] = useState(false);
+  const lastHeartbeatTimeRef = useRef(0);
 
   useEffect(() => {
       localStorage.setItem('tuxshow_sync_mode', syncMode);
@@ -1307,9 +1646,20 @@ export default function App() {
       } catch (e) {}
   }, [syncMode]);
 
+  useEffect(() => {
+      localStorage.setItem('tuxshow_backup_ip', backupIp);
+      try {
+          const { ipcRenderer } = window.require('electron');
+          ipcRenderer.invoke('set-backup-ip', backupIp);
+      } catch (e) {}
+  }, [backupIp]);
+
   // HOT-STANDBY BACKUP LISTENER
   useEffect(() => {
-      if (syncMode !== 'backup') return;
+      if (syncMode !== 'backup') {
+          setSyncActive(false);
+          return;
+      }
       
       try {
           const { ipcRenderer } = window.require('electron');
@@ -1317,7 +1667,22 @@ export default function App() {
               // Lock out local execution while slaved
               isExecutingRef.current = true; 
               
-              if (payload.cues) setCues(payload.cues);
+              if (payload.cues) {
+                  setCues(prev => {
+                      return payload.cues.map((masterCue, index) => {
+                          let existingBackupCue = prev.find(c => String(c.id) === String(masterCue.id));
+                          if (!existingBackupCue && prev.length === payload.cues.length) {
+                              // Fallback to array index matching for legacy show files that lacked IDs
+                              existingBackupCue = prev[index];
+                          }
+                          if (existingBackupCue) {
+                              // Preserve local media path URLs and heavy static assets on the backup
+                              return { ...existingBackupCue, ...masterCue, url: existingBackupCue.url };
+                          }
+                          return masterCue;
+                      });
+                  });
+              }
               if (payload.pins) setPins(payload.pins);
               if (payload.gridSize) setGridSize(payload.gridSize);
               if (payload.isPaused !== undefined) setIsPaused(payload.isPaused);
@@ -1327,8 +1692,25 @@ export default function App() {
               setTimeout(() => { isExecutingRef.current = false; }, 50);
           };
           
+          const handleHeartbeat = (event, payload) => {
+              lastHeartbeatTimeRef.current = performance.now();
+              setSyncActive(true);
+          };
+
           ipcRenderer.on('network-sync-receive', handleNetworkSync);
-          return () => ipcRenderer.removeListener('network-sync-receive', handleNetworkSync);
+          ipcRenderer.on('network-sync-heartbeat', handleHeartbeat);
+          
+          const intervalId = setInterval(() => {
+              if (performance.now() - lastHeartbeatTimeRef.current > 3000) {
+                  setSyncActive(false);
+              }
+          }, 1000);
+
+          return () => {
+              ipcRenderer.removeListener('network-sync-receive', handleNetworkSync);
+              ipcRenderer.removeListener('network-sync-heartbeat', handleHeartbeat);
+              clearInterval(intervalId);
+          };
       } catch (e) {}
   }, [syncMode]);
 
@@ -1342,13 +1724,13 @@ export default function App() {
               if (showData.cues) setCues(showData.cues);
               if (showData.pins) setPins(showData.pins);
               if (showData.gridSize) setGridSize(showData.gridSize);
-              alert("New .TSPack received and loaded from Master!");
+              showToast("New .TSPack received and loaded from Master!", "success");
               setTimeout(() => { isExecutingRef.current = false; }, 50);
           };
           ipcRenderer.on('network-pack-received', handlePackReceived);
           return () => ipcRenderer.removeListener('network-pack-received', handlePackReceived);
       } catch (e) {}
-  }, [syncMode]);
+  }, [syncMode, showToast]);
 
   const [deckConfig, setDeckConfig] = useState(() => { 
     try { 
@@ -1459,15 +1841,54 @@ export default function App() {
     });
   }, []);
 
+  const triggerNextCueAfter = useCallback((currentCueId) => {
+    const currentCue = cuesRef.current.find(c => c.id === currentCueId);
+    if (currentCue && currentCue.type === 'surtitle') {
+      lastSurtitleTimerFireRef.current = performance.now();
+    }
+    const currentIndex = cuesRef.current.findIndex(c => c.id === currentCueId);
+    if (currentIndex >= 0 && currentIndex < cuesRef.current.length - 1) {
+        let nextCueRaw = null;
+        for (let i = currentIndex + 1; i < cuesRef.current.length; i++) {
+            if (!cuesRef.current[i].disabled) {
+                nextCueRaw = cuesRef.current[i];
+                break;
+            }
+        }
+        if (nextCueRaw && nextCueRaw.state !== 'playing') {
+             workerRef.current?.postMessage({ action: 'EVALUATE_GO', payload: { targetIds: [nextCueRaw.id], source: 'auto-follow' } });
+        }
+    }
+  }, []);
+
   const handleGo = useCallback(() => {
     if (isExecutingRef.current) return;
     if (selectedCueIds.length === 0) return; setIsPaused(false); setGlobalPause(false);
     isExecutingRef.current = true; setTimeout(() => { isExecutingRef.current = false; }, 500);
     
+    const activeSurtitle = cues.find(c => c.type === 'surtitle' && c.state === 'playing');
+    if (activeSurtitle) {
+      if (performance.now() - lastSurtitleTimerFireRef.current < 150) {
+        console.warn("[TuxShow Surtitles] Manual line advance in handleGo blocked by 150ms auto-advance lock.");
+        return;
+      }
+      const lines = activeSurtitle.surtitleLines || [];
+      const currLine = activeSurtitle.currentLineIndex ?? -1;
+      if (currLine < lines.length - 1) {
+        setCues(prev => prev.map(c => c.id === activeSurtitle.id ? { ...c, currentLineIndex: currLine + 1 } : c));
+        return;
+      } else {
+        setCues(prev => prev.map(c => c.id === activeSurtitle.id ? { ...c, state: 'completed', currentLineIndex: c.holdAtEnd ? c.currentLineIndex : -1 } : c));
+        if (activeSurtitle.followAction === 'auto-follow') {
+          setTimeout(() => triggerNextCueAfter(activeSurtitle.id), 0);
+        }
+      }
+    }
+    
     workerRef.current?.postMessage({ action: 'EVALUATE_GO', payload: { targetIds: selectedCueIds, source: 'handleGo' } });
-  }, [selectedCueIds]);
+  }, [selectedCueIds, cues, triggerNextCueAfter]);
 
-  const handleStopAll = useCallback(() => { setCues(prev => prev.map(cue => ({ ...cue, state: 'stopped' }))); setIsPaused(false); setGlobalPause(false); }, []);
+  const handleStopAll = useCallback(() => { setCues(prev => prev.map(cue => ({ ...cue, state: 'stopped', currentLineIndex: cue.type === 'surtitle' ? -1 : cue.currentLineIndex }))); setIsPaused(false); setGlobalPause(false); }, []);
   const stopCue = useCallback((id) => { 
     setCues(prev => {
         const getDescendantIds = (parentId) => {
@@ -1485,7 +1906,7 @@ export default function App() {
         if (targetCue && targetCue.type === 'group') {
             idsToStop.push(...getDescendantIds(id));
         }
-        return prev.map(cue => (idsToStop.includes(cue.id) && !cue.lockedBy) ? { ...cue, state: (cue.state === 'playing' || cue.state === 'completed') && cue.fadeOutTime > 0 ? 'stopping' : 'stopped' } : cue);
+        return prev.map(cue => (idsToStop.includes(cue.id) && !cue.lockedBy) ? { ...cue, state: (cue.state === 'playing' || cue.state === 'completed') && cue.fadeOutTime > 0 ? 'stopping' : 'stopped', currentLineIndex: (cue.type === 'surtitle' && !((cue.state === 'playing' || cue.state === 'completed') && cue.fadeOutTime > 0)) ? -1 : cue.currentLineIndex } : cue);
     }); 
   }, []);
 
@@ -1493,15 +1914,72 @@ export default function App() {
     if (isProjector) {
       try {
         const { ipcRenderer } = window.require('electron');
-        const handleStateSync = (event, state) => { if (state.cues) setCues(state.cues); if (state.pins) setPins(state.pins); if (state.gridSize) setGridSize(state.gridSize); if (state.isPaused !== undefined) setIsPaused(state.isPaused); if (state.globalPause !== undefined) setGlobalPause(state.globalPause); if (state.audioOutputDeviceId !== undefined) setAudioOutputDeviceId(state.audioOutputDeviceId); if (state.enableLocalAudio !== undefined) setEnableLocalAudio(state.enableLocalAudio); };
+        const handleStateSync = (event, state) => { 
+            if (state.cues) {
+                setCues(prev => {
+                    return state.cues.map((masterCue, index) => {
+                        const existingCue = prev.find(c => String(c.id) === String(masterCue.id)) || prev[index];
+                        if (existingCue) return { ...existingCue, ...masterCue };
+                        return masterCue;
+                    });
+                });
+            }
+            if (state.pins) setPins(state.pins); 
+            if (state.gridSize) setGridSize(state.gridSize); 
+            if (state.isPaused !== undefined) setIsPaused(state.isPaused); 
+            if (state.globalPause !== undefined) setGlobalPause(state.globalPause); 
+            if (state.audioOutputDeviceId !== undefined) setAudioOutputDeviceId(state.audioOutputDeviceId); 
+            if (state.enableLocalAudio !== undefined) setEnableLocalAudio(state.enableLocalAudio); 
+        };
         ipcRenderer.on('sync-state', handleStateSync); ipcRenderer.send('request-state'); return () => ipcRenderer.removeListener('sync-state', handleStateSync);
       } catch (e) {
-        const bc = new BroadcastChannel('tuxshow_sync_channel'); bc.onmessage = (event) => { if (event.data && event.data.type === 'SYNC_STATE') { const state = event.data.payload; if (state.cues) setCues(state.cues); if (state.pins) setPins(state.pins); if (state.gridSize) setGridSize(state.gridSize); if (state.isPaused !== undefined) setIsPaused(state.isPaused); if (state.globalPause !== undefined) setGlobalPause(state.globalPause); if (state.audioOutputDeviceId !== undefined) setAudioOutputDeviceId(state.audioOutputDeviceId); if (state.enableLocalAudio !== undefined) setEnableLocalAudio(state.enableLocalAudio); } }; return () => bc.close();
+        const bc = new BroadcastChannel('tuxshow_sync_channel'); 
+        bc.onmessage = (event) => { 
+            if (event.data && event.data.type === 'SYNC_STATE') { 
+                const state = event.data.payload; 
+                if (state.cues) {
+                    setCues(prev => {
+                        return state.cues.map((masterCue, index) => {
+                            const existingCue = prev.find(c => String(c.id) === String(masterCue.id)) || prev[index];
+                            if (existingCue) return { ...existingCue, ...masterCue };
+                            return masterCue;
+                        });
+                    });
+                }
+                if (state.pins) setPins(state.pins); 
+                if (state.gridSize) setGridSize(state.gridSize); 
+                if (state.isPaused !== undefined) setIsPaused(state.isPaused); 
+                if (state.globalPause !== undefined) setGlobalPause(state.globalPause); 
+                if (state.audioOutputDeviceId !== undefined) setAudioOutputDeviceId(state.audioOutputDeviceId); 
+                if (state.enableLocalAudio !== undefined) setEnableLocalAudio(state.enableLocalAudio); 
+            } 
+        }; 
+        return () => bc.close();
       }
     }
   }, [isProjector]);
 
   const lastPlaybackStateRef = useRef(null);
+
+  const lastStructuralStateRef = useRef('');
+  useEffect(() => {
+    if (isProjector || isReceiver) return;
+    const structuralPayload = JSON.stringify({
+      cues: cues.map(c => {
+        const { state, currentLineIndex, counterCurrent, triggerTime, ...rest } = c;
+        return rest;
+      }),
+      pins,
+      gridSize
+    });
+    if (structuralPayload !== lastStructuralStateRef.current) {
+      lastStructuralStateRef.current = structuralPayload;
+      const timeoutId = setTimeout(() => {
+        localStorage.setItem('tuxshow_state', JSON.stringify({ cues, pins, gridSize, isPaused: false, globalPause: false }));
+      }, 1000);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [cues, pins, gridSize, isProjector, isReceiver]);
 
   useEffect(() => {
     if (!isProjector) {
@@ -1515,7 +1993,6 @@ export default function App() {
       lastPlaybackStateRef.current = currentPlaybackState;
 
       const syncData = () => {
-        localStorage.setItem('tuxshow_state', JSON.stringify({ cues, pins, gridSize, isPaused, globalPause }));
         const statePayload = { cues, pins, gridSize, isPaused, globalPause, audioOutputDeviceId, enableLocalAudio };
         try { 
             const { ipcRenderer } = window.require('electron'); 
@@ -1597,14 +2074,36 @@ export default function App() {
           if (isProjector) {
             el.muted = true;
           } else {
-            el.muted = !(projectorActive || enableLocalAudio);
+            el.muted = false;
+            routeElementAudio(el);
           }
         }
       }
     });
-  }, [projectorActive, enableLocalAudio, isProjector]);
+  }, [projectorActive, enableLocalAudio, isProjector, cues, routeElementAudio]);
 
-  useEffect(() => { if (showSettingsModal && !isProjector) { try { const { ipcRenderer } = window.require('electron'); ipcRenderer.invoke('get-displays').then(displays => { setHardwareDisplays(displays); if (selectedDisplays.length === 0 && displays.length > 1) { const secondary = displays.find(d => !d.isPrimary); if (secondary) setSelectedDisplays([secondary.id]); } }); } catch (e) {} } }, [showSettingsModal]);
+  useEffect(() => {
+    if (!isProjector) {
+      const fetchDisplays = () => {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          ipcRenderer.invoke('get-displays').then(displays => {
+            setHardwareDisplays(displays);
+            if (selectedDisplays.length === 0 && displays.length > 1) {
+              const secondary = displays.find(d => !d.isPrimary);
+              if (secondary) setSelectedDisplays([secondary.id]);
+            }
+          });
+        } catch (e) {
+          setHardwareDisplays([
+            { id: 'primary', label: 'Primary Screen (Mock)', isPrimary: true },
+            { id: 'projector-1', label: 'HDMI-1 Projector (Mock)', isPrimary: false }
+          ]);
+        }
+      };
+      fetchDisplays();
+    }
+  }, [isProjector, showSettingsModal]);
   useEffect(() => { try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('update-io-config', ioConfig); } catch(e) {} localStorage.setItem('tuxshow_io_config', JSON.stringify(ioConfig)); }, [ioConfig]);
   useEffect(() => { localStorage.setItem('tuxshow_displays', JSON.stringify(selectedDisplays)); }, [selectedDisplays]);
   useEffect(() => { localStorage.setItem('tuxshow_virtual_display', JSON.stringify(virtualDisplayConfig)); }, [virtualDisplayConfig]);
@@ -1743,37 +2242,58 @@ export default function App() {
       };
       ipcRenderer.on('tuxshow:shader-registered', handleShaderRegistration);
 
+      const handleWebhookError = (event, { error, url }) => {
+          console.error(`[Webhook Error] ${error} for ${url}`);
+          showToast(`${error} (${url})`, 'danger');
+      };
+      ipcRenderer.on('webhook-error', handleWebhookError);
+
       return () => {
           ipcRenderer.removeListener('osc-message', handleOscMessage);
           ipcRenderer.removeListener('tuxshow:shader-registered', handleShaderRegistration);
+          ipcRenderer.removeListener('webhook-error', handleWebhookError);
       };
     } catch (e) {}
   }, [handleGo, handleStopAll, scrollCueIntoView, stopCue]);
 
-  const triggerNextCueAfter = useCallback((currentCueId) => {
-    const currentIndex = cuesRef.current.findIndex(c => c.id === currentCueId);
-    if (currentIndex >= 0 && currentIndex < cuesRef.current.length - 1) {
-        let nextCueRaw = null;
-        for (let i = currentIndex + 1; i < cuesRef.current.length; i++) {
-            if (!cuesRef.current[i].disabled) {
-                nextCueRaw = cuesRef.current[i];
-                break;
-            }
-        }
-        if (nextCueRaw && nextCueRaw.state !== 'playing') {
-             workerRef.current?.postMessage({ action: 'EVALUATE_GO', payload: { targetIds: [nextCueRaw.id], source: 'auto-follow' } });
-        }
-    }
-  }, []);
+
 
   useEffect(() => {
-    const actionCues = cues.filter(c => ((c.type === 'pause' && (!c.duration || c.duration <= 0)) || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'projector' || c.type === 'stop' || c.type === 'state-changer' || c.type === 'select' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous') || (c.type === 'dmx' && (!c.duration || c.duration <= 0))) && c.state === 'playing');
+    const actionCues = cues.filter(c => (
+      c.type === 'memo' ||
+      c.type === 'webhook' ||
+      (c.type === 'pause' && (!c.duration || c.duration <= 0)) ||
+      c.type === 'counter' ||
+      c.type === 'msc' ||
+      c.type === 'osc' ||
+      c.type === 'projector' ||
+      c.type === 'stop' ||
+      c.type === 'state-changer' ||
+      c.type === 'select' ||
+      (c.type === 'conditional' && c.conditionRunMode !== 'continuous') ||
+      (c.type === 'dmx' && (!c.duration || c.duration <= 0))
+    ) && c.state === 'playing');
     if (actionCues.length > 0) {
       if (actionCues.some(c => c.type === 'pause')) setIsPaused(true);
       
       setCues(prev => {
         let nextState = [...prev];
-        nextState = nextState.map(c => (((c.type === 'pause' && (!c.duration || c.duration <= 0)) || c.type === 'counter' || c.type === 'msc' || c.type === 'osc' || c.type === 'projector' || c.type === 'stop' || c.type === 'state-changer' || c.type === 'select' || (c.type === 'conditional' && c.conditionRunMode !== 'continuous') || (c.type === 'dmx' && (!c.duration || c.duration <= 0))) && c.state === 'playing') ? { ...c, state: 'completed' } : c);
+        nextState = nextState.map(c => (
+          (
+            c.type === 'memo' ||
+            c.type === 'webhook' ||
+            (c.type === 'pause' && (!c.duration || c.duration <= 0)) ||
+            c.type === 'counter' ||
+            c.type === 'msc' ||
+            c.type === 'osc' ||
+            c.type === 'projector' ||
+            c.type === 'stop' ||
+            c.type === 'state-changer' ||
+            c.type === 'select' ||
+            (c.type === 'conditional' && c.conditionRunMode !== 'continuous') ||
+            (c.type === 'dmx' && (!c.duration || c.duration <= 0))
+          ) && c.state === 'playing'
+        ) ? { ...c, state: 'completed' } : c);
         
         actionCues.filter(ac => ac.type === 'stop').forEach(sc => {
           const target = nextState.find(c => String(c.number) === String(sc.targetCueNumber).trim());
@@ -1847,6 +2367,26 @@ export default function App() {
                 ipcRenderer.send('fire-projector-cue', { ip: ac.projectorIp, port: ac.projectorPort, protocol: ac.projectorProtocol, payload: ac.projectorPayload }); 
             } catch (e) {} 
         }
+        if (ac.type === 'webhook') {
+            try {
+                const { ipcRenderer } = window.require('electron');
+                ipcRenderer.send('fire-webhook-cue', { url: ac.webhookUrl, method: ac.webhookMethod, headers: ac.webhookHeaders, body: ac.webhookBody });
+            } catch (e) {
+                // Direct browser fetch fallback
+                const parsedHeaders = {};
+                if (ac.webhookHeaders) {
+                    try { Object.assign(parsedHeaders, typeof ac.webhookHeaders === 'string' ? JSON.parse(ac.webhookHeaders) : ac.webhookHeaders); } catch(err) {}
+                }
+                if (ac.webhookBody && !parsedHeaders['Content-Type'] && !parsedHeaders['content-type']) {
+                    try { JSON.parse(ac.webhookBody); parsedHeaders['Content-Type'] = 'application/json'; } catch(err) {}
+                }
+                fetch(ac.webhookUrl, {
+                    method: ac.webhookMethod || 'GET',
+                    headers: parsedHeaders,
+                    body: ['POST', 'PUT', 'PATCH'].includes(ac.webhookMethod) ? ac.webhookBody : undefined
+                }).catch(err => console.error("Web fallback fetch error:", err));
+            }
+        }
         if (ac.followAction === 'auto-follow' && (!ac.duration || ac.duration <= 0)) setTimeout(() => triggerNextCueAfter(ac.id), 0); 
       });
     }
@@ -1904,7 +2444,7 @@ export default function App() {
               if (cue.type === 'pause') { setIsPaused(false); setGlobalPause(false); }
             }
           } else {
-            if (!cue.duration || cue.duration <= 0 || ['video', 'audio', 'camera', 'animate'].includes(cue.type)) return;
+            if (!cue.duration || cue.duration <= 0 || ['video', 'audio', 'camera', 'animate', 'surtitle'].includes(cue.type)) return;
             if (elapsed >= cue.duration) {
               console.log(`[TuxShow] Auto-Timeout: ${cue.number} exceeded duration.`);
               if (cue.holdAtEnd) {
@@ -1945,7 +2485,7 @@ export default function App() {
     cues.forEach(cue => {
       const trackKey = cue.id; const lastState = fadeStateTrackers.current[trackKey]?.state;
       const lastTriggerTime = fadeStateTrackers.current[trackKey]?.triggerTime;
-      const el = document.getElementById(`master-${cue.type === 'audio' ? 'aud' : (cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : (cue.type === 'timer' ? 'timer' : (cue.type === 'camera' ? 'cam' : 'vid'))))}-${cue.id}`);
+      const el = document.getElementById(`master-${cue.type === 'audio' ? 'aud' : (cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : (cue.type === 'timer' ? 'timer' : (cue.type === 'surtitle' ? 'surtitle' : (cue.type === 'camera' ? 'cam' : 'vid')))))}-${cue.id}`);
 
       const isNewTrigger = cue.state === 'playing' && (lastState !== 'playing' || (cue.triggerTime && lastTriggerTime !== cue.triggerTime));
 
@@ -1980,11 +2520,12 @@ export default function App() {
                   }
                   if (targetId) workerRef.current?.postMessage({ action: 'EVALUATE_GO', payload: { targetIds: [targetId], source: 'transition' } });
               }, 0);
-          } else if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx'].includes(cue.type)) {
+          } else if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx','memo','surtitle','animate','select','state-changer','sequence','webhook'].includes(cue.type)) {
               if (isProjector) {
                   el.muted = true;
               } else {
-                  el.muted = !(projectorActive || enableLocalAudio);
+                  el.muted = false;
+                  routeElementAudio(el);
               }
               
               const startPlayback = () => {
@@ -1995,10 +2536,15 @@ export default function App() {
                   if (cue.fadeInTime > 0) doVolumeFade(el, 0, cue.volume !== undefined ? cue.volume : 1, cue.fadeInTime); 
                   else el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current;
                   
+                  if (!isProjector) {
+                      el.muted = false;
+                      routeElementAudio(el);
+                  }
+
                   const p = el.play();
                   if (p !== undefined) p.catch(()=>{});
               };
-
+ 
               if (cue.mediaSyncOffset < 0) {
                   syncTimers.current[cue.id] = setTimeout(() => {
                       if (fadeStateTrackers.current[trackKey]?.state === 'playing') startPlayback();
@@ -2008,9 +2554,9 @@ export default function App() {
               }
           }
       } else if (cue.state === 'stopping' && lastState !== 'stopping') {
-      fadeStateTrackers.current[trackKey] = { state: 'stopping', start: performance.now(), animStart: fadeStateTrackers.current[trackKey]?.animStart || performance.now(), duration: cue.fadeOutTime || 0 };
-          if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx'].includes(cue.type)) { if (cue.fadeOutTime > 0) { const currentBaseVol = masterVolumeRef.current > 0 ? el.volume / masterVolumeRef.current : (cue.volume !== undefined ? cue.volume : 1); doVolumeFade(el, currentBaseVol, 0, cue.fadeOutTime); } }
-          if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]); advanceTimers.current[`stop-${cue.id}`] = setTimeout(() => { setCues(prev => prev.map(c => c.id === cue.id ? { ...c, state: 'stopped' } : c)); }, (cue.fadeOutTime || 0) * 1000);
+          fadeStateTrackers.current[trackKey] = { state: 'stopping', start: performance.now(), animStart: fadeStateTrackers.current[trackKey]?.animStart || performance.now(), duration: cue.fadeOutTime || 0 };
+          if (el && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx','memo','surtitle','animate','select','state-changer','sequence','webhook'].includes(cue.type)) { if (cue.fadeOutTime > 0) { const currentBaseVol = masterVolumeRef.current > 0 ? el.volume / masterVolumeRef.current : (cue.volume !== undefined ? cue.volume : 1); doVolumeFade(el, currentBaseVol, 0, cue.fadeOutTime); } }
+          if (advanceTimers.current[`stop-${cue.id}`]) clearTimeout(advanceTimers.current[`stop-${cue.id}`]); advanceTimers.current[`stop-${cue.id}`] = setTimeout(() => { setCues(prev => prev.map(c => c.id === cue.id ? { ...c, state: 'stopped', currentLineIndex: c.type === 'surtitle' ? -1 : c.currentLineIndex } : c)); }, (cue.fadeOutTime || 0) * 1000);
       } else if ((cue.state === 'stopped' || cue.state === 'completed') && lastState !== 'stopped' && lastState !== 'completed') {
           fadeStateTrackers.current[trackKey] = { state: cue.state, start: 0, duration: 0, fromStopping: lastState === 'stopping' }; if (fadeStateTrackers.current[trackKey].snapshot) delete fadeStateTrackers.current[trackKey].snapshot; if (fadeStateTrackers.current[trackKey].snapshotWebRTC) delete fadeStateTrackers.current[trackKey].snapshotWebRTC; if (advanceTimers.current[`stop-${cue.id}`]) { clearTimeout(advanceTimers.current[`stop-${cue.id}`]); delete advanceTimers.current[`stop-${cue.id}`]; } if (el && fadeIntervals.current[el.id]) clearInterval(fadeIntervals.current[el.id]);
           if (syncTimers.current[cue.id]) { clearTimeout(syncTimers.current[cue.id]); delete syncTimers.current[cue.id]; }
@@ -2022,10 +2568,12 @@ export default function App() {
               }
           }
       }
-      if (cue.state === 'playing' && lastState === 'playing' && el && !fadeIntervals.current[el.id] && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx'].includes(cue.type)) { el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current; }
+      if (cue.state === 'playing' && lastState === 'playing' && el && !fadeIntervals.current[el.id] && !['image','goto','blackout','pause','counter','transition','group','time','text','msc','osc','projector','stop','conditional','timer','dmx','memo','surtitle','animate','select','state-changer','sequence','webhook'].includes(cue.type)) { el.volume = (cue.volume !== undefined ? cue.volume : 1) * masterVolumeRef.current; }
     });
   }, [cues, doVolumeFade, scrollCueIntoView]);
 
+  const lastSyncHashRef = useRef('');
+  const lastSyncedWorkerRef = useRef(null);
   useEffect(() => {
     if (workerRef.current && !isProjector && !isReceiver) {
         const strippedCues = cues.map(c => ({ id: c.id, type: c.type, state: c.state, groupId: c.groupId, disabled: c.disabled, gotoMode: c.gotoMode, targetCueRangeMin: c.targetCueRangeMin, targetCueRangeMax: c.targetCueRangeMax, targetCueNumber: c.targetCueNumber, number: c.number, groupMode: c.groupMode, counterCurrent: c.counterCurrent, counterLimit: c.counterLimit, conditionRunMode: c.conditionRunMode, conditionType: c.conditionType, conditionOscPath: c.conditionOscPath, conditionOscValue: c.conditionOscValue, conditionTargetCue: c.conditionTargetCue, conditionState: c.conditionState, trueTargetCue: c.trueTargetCue, falseTargetCue: c.falseTargetCue, duration: c.duration, animTargetCue: c.animTargetCue, animProperty: c.animProperty, animStartValue: c.animStartValue, animEndValue: c.animEndValue, animPathEnabled: c.animPathEnabled, triggerBehavior: c.triggerBehavior, fadeTargetCue: c.fadeTargetCue }));
@@ -2036,10 +2584,15 @@ export default function App() {
             strippedTrackers[key] = { start: value.start, animStart: value.animStart };
         }
 
-        workerRef.current.postMessage({ 
-            action: 'SYNC_STATE', 
-            payload: { cues: strippedCues, oscValues: oscValuesRef.current, trackers: strippedTrackers, mainTime: performance.now() } 
-        });
+        const syncHash = JSON.stringify(strippedCues) + JSON.stringify(strippedTrackers);
+        if (syncHash !== lastSyncHashRef.current || workerRef.current !== lastSyncedWorkerRef.current) {
+            lastSyncHashRef.current = syncHash;
+            lastSyncedWorkerRef.current = workerRef.current;
+            workerRef.current.postMessage({ 
+                action: 'SYNC_STATE', 
+                payload: { cues: strippedCues, oscValues: oscValuesRef.current, trackers: strippedTrackers, mainTime: performance.now() } 
+            });
+        }
     }
   }, [cues, isProjector, isReceiver]);
 
@@ -2123,8 +2676,9 @@ export default function App() {
     
     const renderLoop = () => {
       const now = performance.now();
-      // Throttle the UI preview frame rate to save CPU (60fps, 30fps, or 15fps)
-      if (now - lastRenderTime.current < (1000 / perfFlags.previewFps)) {
+      // Projector output runs at 60fps. Preview runs at 15fps when projector is active, otherwise standard previewFps.
+      const fpsLimit = isProjector ? 60 : (projectorActive ? 15 : perfFlags.previewFps);
+      if (now - lastRenderTime.current < (1000 / fpsLimit)) {
           animId = requestAnimationFrame(renderLoop);
           return;
       }
@@ -2141,8 +2695,11 @@ export default function App() {
 
       const currentCues = activeCuesRef.current;
       
-      // --- OPTIMIZED ANIMATE MODIFIER CALCULATION ---
-      const animModifiers = JSON.parse(JSON.stringify(animModifiersRef.current || {}));
+      const animModifiers = {};
+      const refModifiers = animModifiersRef.current || {};
+      for (const [cueNum, props] of Object.entries(refModifiers)) {
+          animModifiers[cueNum] = { ...props };
+      }
       
       const allCues = cuesRef.current;
       for (let i = 0; i < allCues.length; i++) {
@@ -2180,10 +2737,15 @@ export default function App() {
       // ----------------------------------------
 
       currentCues.forEach(cue => {
-        if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'projector', 'stop', 'conditional', 'animate', 'state-changer', 'select', 'dmx'].includes(cue.type)) return;
+        if (['audio', 'goto', 'pause', 'counter', 'transition', 'group', 'time', 'msc', 'osc', 'projector', 'stop', 'conditional', 'animate', 'state-changer', 'select', 'dmx', 'memo', 'webhook'].includes(cue.type)) return;
         if (cue.disabled) return;
         
-        const showOnMaster = !isProjector || (displayId === 'all') || (cue.targetDisplay === 'all' || String(cue.targetDisplay) === String(displayId));
+        const showOnMaster = isProjector
+          ? (displayId === 'all' || cue.targetDisplay === 'all' || String(cue.targetDisplay) === String(displayId))
+          : (previewDisplayFilterRef.current === 'all' || 
+             (previewDisplayFilterRef.current === 'webrtc' && (cue.targetDisplay === 'all' || cue.targetDisplay === 'webrtc')) ||
+             cue.targetDisplay === 'all' || 
+             String(cue.targetDisplay) === String(previewDisplayFilterRef.current));
         const showOnWebRTC = !isProjector && (cue.targetDisplay === 'all' || cue.targetDisplay === 'webrtc');
         if (!showOnMaster && !showOnWebRTC) return;
 
@@ -2195,7 +2757,7 @@ export default function App() {
             return; 
         }
 
-        let mediaEl = tracker?.mediaElement || document.getElementById(`master-${cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : (cue.type === 'timer' ? 'timer' : (cue.type === 'camera' ? 'cam' : 'vid')))}-${cue.id}`);
+        let mediaEl = tracker?.mediaElement || document.getElementById(`master-${cue.type === 'image' ? 'img' : (cue.type === 'text' ? 'text' : (cue.type === 'timer' ? 'timer' : (cue.type === 'surtitle' ? 'surtitle' : (cue.type === 'camera' ? 'cam' : 'vid'))))}-${cue.id}`);
         if (cue.chromaKeyEnabled) { const chromaEl = document.getElementById(`master-chroma-${cue.id}`); if (chromaEl) mediaEl = chromaEl; }
         if (!mediaEl) return; if (mediaEl instanceof HTMLVideoElement && mediaEl.readyState < 2) return; if (mediaEl instanceof HTMLImageElement && !mediaEl.complete) return;
         
@@ -2252,52 +2814,6 @@ export default function App() {
         const dx = (stageSize.w * pX) - (dw / 2); 
         const dy = (stageSize.h * pY) - (dh / 2);
 
-        const drawToCtx = (ctx, imageToDraw) => {
-            if (cue.warpEnabled && cue.warpPins) {
-                const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
-                ctx.save();
-                ctx.beginPath();
-                ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[3].x, pts[3].y);
-                ctx.closePath(); ctx.clip();
-                applyCanvasAffine(ctx, dw, dh, pts[0], pts[1], pts[3], 1);
-                ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
-                ctx.restore();
-
-                ctx.save();
-                ctx.beginPath();
-                ctx.moveTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y);
-                ctx.closePath(); ctx.clip();
-                applyCanvasAffine(ctx, dw, dh, pts[1], pts[2], pts[3], 2);
-                ctx.drawImage(imageToDraw, sx, sy, sw, sh, 0, 0, dw, dh);
-                ctx.restore();
-            } else {
-                ctx.drawImage(imageToDraw, sx, sy, sw, sh, dx, dy, dw, dh);
-            }
-            
-            ctx.filter = 'none'; // Ensure outline isn't color filtered
-
-            if (cue.outlineEnabled) {
-                ctx.save();
-                if (cue.warpEnabled && cue.warpPins) {
-                     const pts = cue.warpPins.map(p => ({ x: dx + p.x * dw, y: dy + p.y * dh }));
-                     ctx.beginPath();
-                     ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); ctx.closePath();
-                } else {
-                     ctx.beginPath();
-                     ctx.rect(dx, dy, dw, dh);
-                }
-                ctx.strokeStyle = cue.outlineColor || '#ffffff';
-                ctx.lineWidth = cue.outlineWidth || 2;
-                ctx.stroke();
-                ctx.restore();
-            }
-        };
-
-        const drawWrapper = (imageToDraw) => {
-             if (showOnMaster) drawToCtx(masterCtx, imageToDraw);
-             if (showOnWebRTC) drawToCtx(webrtcCtx, imageToDraw);
-        };
-
         try {
             if (cue.maskEnabled && cue.maskDataUrl) {
                const maskEl = document.getElementById(`master-mask-${cue.id}`);
@@ -2309,9 +2825,16 @@ export default function App() {
                    maskCtx.drawImage(maskEl, sx, sy, sw, sh, 0, 0, sw, sh); 
                    maskCtx.globalCompositeOperation = 'source-in'; 
                    maskCtx.drawImage(renderSource, sx, sy, sw, sh, 0, 0, sw, sh);
-                   drawWrapper(maskCanvas);
-               } else drawWrapper(renderSource);
-            } else drawWrapper(renderSource);
+                   if (showOnMaster) drawCueToCtx(masterCtx, maskCanvas, cue, sx, sy, sw, sh, dx, dy, dw, dh);
+                   if (showOnWebRTC) drawCueToCtx(webrtcCtx, maskCanvas, cue, sx, sy, sw, sh, dx, dy, dw, dh);
+               } else {
+                   if (showOnMaster) drawCueToCtx(masterCtx, renderSource, cue, sx, sy, sw, sh, dx, dy, dw, dh);
+                   if (showOnWebRTC) drawCueToCtx(webrtcCtx, renderSource, cue, sx, sy, sw, sh, dx, dy, dw, dh);
+               }
+            } else {
+               if (showOnMaster) drawCueToCtx(masterCtx, renderSource, cue, sx, sy, sw, sh, dx, dy, dw, dh);
+               if (showOnWebRTC) drawCueToCtx(webrtcCtx, renderSource, cue, sx, sy, sw, sh, dx, dy, dw, dh);
+            }
         } catch(err) { }
         if (showOnMaster) { masterCtx.globalAlpha = 1; masterCtx.filter = 'none'; }
         if (showOnWebRTC) { webrtcCtx.globalAlpha = 1; webrtcCtx.filter = 'none'; }
@@ -2357,31 +2880,36 @@ export default function App() {
       });
 
       const viewPrefix = isProjector ? 'proj' : 'local'; const safeQuadW = Math.max(1, stageSize.w / gridSize.x); const safeQuadH = Math.max(1, stageSize.h / gridSize.y);
-      for (let y = 0; y < gridSize.y; y++) { for (let x = 0; x < gridSize.x; x++) { const qIdx = y * gridSize.x + x; [1, 2].forEach(tri => { 
-          const cacheKey = `${qIdx}-${tri}`;
-          let ctx = quadCtxCache[cacheKey];
-          if (!ctx || !ctx.canvas.isConnected) { 
-             const canvas = document.getElementById(`quad-ctx-${viewPrefix}-${qIdx}-${tri}`); 
-             if (canvas) { ctx = canvas.getContext('2d', { alpha: false }); quadCtxCache[cacheKey] = ctx; } else { quadCtxCache[cacheKey] = null; }
+      for (let y = 0; y < gridSize.y; y++) {
+        for (let x = 0; x < gridSize.x; x++) {
+          const qIdx = y * gridSize.x + x;
+          for (let tri = 1; tri <= 2; tri++) {
+            const cacheKey = `${qIdx}-${tri}`;
+            let ctx = quadCtxCache[cacheKey];
+            if (!ctx || !ctx.canvas.isConnected) { 
+               const canvas = document.getElementById(`quad-ctx-${viewPrefix}-${qIdx}-${tri}`); 
+               if (canvas) { ctx = canvas.getContext('2d', { alpha: false }); quadCtxCache[cacheKey] = ctx; } else { quadCtxCache[cacheKey] = null; }
+            }
+            if (ctx) { 
+               if (ctx.canvas.width !== safeQuadW) ctx.canvas.width = safeQuadW; 
+               if (ctx.canvas.height !== safeQuadH) ctx.canvas.height = safeQuadH; 
+               try { ctx.drawImage(masterCanvas, x * safeQuadW, y * safeQuadH, safeQuadW, safeQuadH, 0, 0, safeQuadW, safeQuadH); } catch(e) {} 
+            } 
           }
-          if (ctx) { 
-             if (ctx.canvas.width !== safeQuadW) ctx.canvas.width = safeQuadW; 
-             if (ctx.canvas.height !== safeQuadH) ctx.canvas.height = safeQuadH; 
-             try { ctx.drawImage(masterCanvas, x * safeQuadW, y * safeQuadH, safeQuadW, safeQuadH, 0, 0, safeQuadW, safeQuadH); } catch(e) {} 
-          } 
-      }); } }
+        }
+      }
       animId = requestAnimationFrame(renderLoop);
     };
     animId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animId);
-  }, [stageSize, gridSize, isProjector, displayId]);
+  }, [stageSize, gridSize, isProjector, displayId, perfFlags, projectorActive]);
 
-  useEffect(() => { cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => { if (['image', 'goto', 'camera', 'blackout', 'pause', 'counter', 'stop', 'group', 'time', 'text', 'msc', 'osc', 'projector', 'conditional', 'timer', 'animate', 'select', 'dmx'].includes(cue.type)) return; const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`); if (el) { if (isPaused && (!cue.lockedBy || globalPause)) el.pause(); else { const p = el.play(); if (p !== undefined) p.catch(()=>{}); } } }); }, [isPaused, globalPause, cues]);
+  useEffect(() => { cues.filter(c => c.state === 'playing' || c.state === 'stopping').forEach(cue => { if (['image', 'goto', 'camera', 'blackout', 'pause', 'counter', 'stop', 'group', 'time', 'text', 'msc', 'osc', 'projector', 'conditional', 'timer', 'animate', 'select', 'dmx', 'memo', 'surtitle', 'webhook'].includes(cue.type)) return; const el = document.getElementById(`master-${cue.type === 'video' ? 'vid' : 'aud'}-${cue.id}`); if (el) { if (isPaused && (!cue.lockedBy || globalPause)) el.pause(); else { if (!isProjector) { el.muted = false; routeElementAudio(el); } const p = el.play(); if (p !== undefined) p.catch(()=>{}); } } }); }, [isPaused, globalPause, cues, isProjector, routeElementAudio]);
   
   useEffect(() => { 
     if (isProjector) return; 
     cues.forEach(cue => { 
-      if (cue.state === 'playing' && cue.followAction === 'auto-follow' && cue.duration > 0 && cue.type !== 'pause' && cue.type !== 'timer' && (!isPaused || (cue.lockedBy && !globalPause))) { 
+      if (cue.state === 'playing' && cue.followAction === 'auto-follow' && cue.duration > 0 && cue.type !== 'pause' && cue.type !== 'timer' && cue.type !== 'surtitle' && (!isPaused || (cue.lockedBy && !globalPause))) { 
         if (!advanceTimers.current[cue.id]) {
             // NEW: Calculate accurate remaining time
             const tracker = fadeStateTrackers.current[cue.id];
@@ -2415,7 +2943,15 @@ export default function App() {
         scaleX: migrated.scaleX ?? 100, scaleY: migrated.scaleY ?? 100, keepAspect: migrated.keepAspect ?? true, posX: migrated.posX ?? 50, posY: migrated.posY ?? 50, cropTop: migrated.cropTop ?? 0, cropBottom: migrated.cropBottom ?? 0, cropLeft: migrated.cropLeft ?? 0, cropRight: migrated.cropRight ?? 0, outlineEnabled: migrated.outlineEnabled ?? false, outlineColor: migrated.outlineColor || '#ffffff', outlineWidth: migrated.outlineWidth ?? 2, warpEnabled: migrated.warpEnabled ?? false, warpPins: migrated.warpPins || [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],
         mediaSyncOffset: migrated.mediaSyncOffset || 0, mediaIn: migrated.mediaIn || 0, mediaOut: migrated.mediaOut || 0, holdAtEnd: migrated.holdAtEnd || false, fadeTargetCue: migrated.fadeTargetCue || '', colorFilterEnabled: migrated.colorFilterEnabled ?? false, hue: migrated.hue || 0, saturation: migrated.saturation ?? 100, brightness: migrated.brightness ?? 100,
         timerDuration: migrated.timerDuration || 60, timerStyle: migrated.timerStyle || 'countdown', timerFormat: migrated.timerFormat || 'MM:SS', timerVisible: migrated.timerVisible ?? true, customOpacity: migrated.customOpacity, shaderId: migrated.shaderId || '', shaderBlurRadius: migrated.shaderBlurRadius ?? 5.0, shaderNoiseIntensity: migrated.shaderNoiseIntensity ?? 0.5, shaderNoiseSpeed: migrated.shaderNoiseSpeed ?? 1.0,
-        conditionRunMode: migrated.conditionRunMode || 'immediate', conditionType: migrated.conditionType || 'cue-state', conditionTargetCue: migrated.conditionTargetCue || '', conditionState: migrated.conditionState || 'playing', conditionOscPath: migrated.conditionOscPath || '/tuxshow/sensor', conditionOscValue: migrated.conditionOscValue || '1', trueTargetCue: migrated.trueTargetCue || '', falseTargetCue: migrated.falseTargetCue || ''
+        conditionRunMode: migrated.conditionRunMode || 'immediate', conditionType: migrated.conditionType || 'cue-state', conditionTargetCue: migrated.conditionTargetCue || '', conditionState: migrated.conditionState || 'playing', conditionOscPath: migrated.conditionOscPath || '/tuxshow/sensor', conditionOscValue: migrated.conditionOscValue || '1', trueTargetCue: migrated.trueTargetCue || '', falseTargetCue: migrated.falseTargetCue || '',
+        memoColor: migrated.memoColor || 'yellow',
+        surtitleLines: migrated.surtitleLines || [],
+        currentLineIndex: migrated.currentLineIndex ?? -1,
+        surtitleFilePath: migrated.surtitleFilePath || '',
+        webhookUrl: migrated.webhookUrl || '',
+        webhookMethod: migrated.webhookMethod || 'GET',
+        webhookHeaders: migrated.webhookHeaders || '',
+        webhookBody: migrated.webhookBody || ''
       };
     });
     setCues(hydratedCues);
@@ -2462,6 +2998,19 @@ export default function App() {
 
                 const isOldFormat = loadedState.cues.some(c => c.fadeTime !== undefined || c.autoAdvance !== undefined);
                 if (isOldFormat) setPendingLoadState(loadedState); else applyLoadedState(loadedState);
+
+                // Auto-deploy TSPack to backup if in master mode with a target IP
+                if (filePath.toLowerCase().endsWith('.tspack') && syncMode === 'master' && backupIp) {
+                    showToast('Deploying .TSPack to Backup...', 'success');
+                    ipcRenderer.invoke('push-tspack-to-backup', { packPath: filePath, targetIp: backupIp })
+                      .then(res => {
+                          if (res.success) showToast('Pack successfully deployed to Backup!', 'success');
+                          else showToast('Failed to deploy pack to Backup: ' + res.error, 'danger');
+                      })
+                      .catch(err => {
+                          showToast('Error deploying pack to Backup: ' + err.message, 'danger');
+                      });
+                }
             }
         } else if (result.error) {
             alert("Failed to load showfile: " + result.error);
@@ -2469,7 +3018,7 @@ export default function App() {
     } catch (err) {
         console.error("Error invoking open-workspace:", err);
     }
-  }, [applyLoadedState]);
+  }, [applyLoadedState, syncMode, backupIp, showToast]);
 
   const handlePackWorkspace = useCallback(async () => {
     if (!packPath) return;
@@ -2554,7 +3103,15 @@ export default function App() {
   const activeCues = useMemo(() => cues.filter(c => selectedCueIds.includes(c.id)), [cues, selectedCueIds]);
   const getSharedVal = useCallback((field, fallback = '') => { if (activeCues.length === 0) return fallback; const val = activeCues[0][field]; return val === undefined || val === null ? fallback : (activeCues.every(c => c[field] === val) ? val : fallback); }, [activeCues]);
   const isMixed = useCallback((field) => { if (activeCues.length === 0) return false; const val = activeCues[0][field]; return !activeCues.every(c => c[field] === val); }, [activeCues]);
-  const updateSelectedCues = useCallback((field, value) => { setCues(prev => prev.map(c => { if (!selectedCueIds.includes(c.id)) return c; return { ...c, [field]: value }; })); }, [selectedCueIds]);
+  const updateSelectedCues = useCallback((field, value) => {
+    if (field === 'currentLineIndex') {
+      if (performance.now() - lastSurtitleTimerFireRef.current < 150) {
+        console.warn("[TuxShow Surtitles] Manual line advance blocked by 150ms auto-advance lock.");
+        return;
+      }
+    }
+    setCues(prev => prev.map(c => { if (!selectedCueIds.includes(c.id)) return c; return { ...c, [field]: value }; }));
+  }, [selectedCueIds]);
 
   const activePlayheadCues = useMemo(() => cues.filter(c => c.state === 'playing'), [cues]);
 
@@ -2630,12 +3187,13 @@ export default function App() {
               {cue.type === 'camera' && <CameraMasterPlayer cue={cue} isPaused={isPaused && (!cue.lockedBy || globalPause)} />}
               {cue.type === 'text' && <TextMasterPlayer cue={cue} />}
               {cue.type === 'timer' && <TimerMasterPlayer cue={cue} fadeStateTrackers={fadeStateTrackers} />}
-              {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted crossOrigin="anonymous" onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline />}
-              {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
-              {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
+              {cue.type === 'surtitle' && <SurtitleMasterPlayer cue={cue} />}
+              {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline onError={(e) => console.error(`[VideoLoader] Failed to load video cue ${cue.id} (${cue.name}) from URL: ${cue.url}`, e)} />}
+              {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" onError={(e) => console.error(`[AudioLoader] Failed to load audio cue ${cue.id} (${cue.name}) from URL: ${cue.url}`, e)} />}
+              {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} alt="" className="hidden" onError={(e) => console.error(`[ImageLoader] Failed to load image cue ${cue.id} (${cue.name}) from URL: ${cue.url}`, e)} />}
               {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
               {['blur', 'noise', 'edge'].includes(cue.shaderId) && <CustomShaderFilter cue={cue} />}
-              {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
+              {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" onError={(e) => console.error(`[MaskLoader] Failed to load mask for cue ${cue.id} (${cue.name})`, e)} />}
             </Fragment>
           ))}
         </div>
@@ -2676,12 +3234,13 @@ export default function App() {
             {cue.type === 'camera' && <CameraMasterPlayer cue={cue} isPaused={isPaused && !cue.lockedBy} />}
             {cue.type === 'text' && <TextMasterPlayer cue={cue} />}
             {cue.type === 'timer' && <TimerMasterPlayer cue={cue} fadeStateTrackers={fadeStateTrackers} />}
-            {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted crossOrigin="anonymous" onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline />}
-            {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" />}
-            {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} crossOrigin="anonymous" alt="" className="hidden" />}
+            {cue.type === 'surtitle' && <SurtitleMasterPlayer cue={cue} />}
+            {cue.type === 'video' && <video id={`master-vid-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" playsInline onError={(e) => console.error(`[VideoLoader] Failed to load video cue ${cue.id} (${cue.name}) from URL: ${cue.url}`, e)} />}
+            {cue.type === 'audio' && <audio id={`master-aud-${cue.id}`} src={cue.url} loop={cue.loop} muted onTimeUpdate={!isProjector ? (e) => handleMediaTimeUpdate(cue.id, e.target) : undefined} onEnded={() => handleCueEnded(cue.id)} className="hidden" onError={(e) => console.error(`[AudioLoader] Failed to load audio cue ${cue.id} (${cue.name}) from URL: ${cue.url}`, e)} />}
+            {cue.type === 'image' && <img id={`master-img-${cue.id}`} src={cue.url} alt="" className="hidden" onError={(e) => console.error(`[ImageLoader] Failed to load image cue ${cue.id} (${cue.name}) from URL: ${cue.url}`, e)} />}
             {cue.chromaKeyEnabled && <ChromaKeyFilter cue={cue} />}
             {['blur', 'noise', 'edge'].includes(cue.shaderId) && <CustomShaderFilter cue={cue} />}
-            {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" crossOrigin="anonymous" />}
+            {cue.maskEnabled && cue.maskDataUrl && <img id={`master-mask-${cue.id}`} src={cue.maskDataUrl} alt="mask" className="hidden" onError={(e) => console.error(`[MaskLoader] Failed to load mask for cue ${cue.id} (${cue.name})`, e)} />}
           </Fragment>
         ))}
       </div>
@@ -2737,7 +3296,7 @@ export default function App() {
            <span className="text-3xl font-black text-blue-500">T</span>
         </div>
         <h2 className="text-xl font-bold text-white mb-1">TuxShow</h2>
-        <p className="text-xs text-gray-500 font-mono mb-6">Version 1.4.0</p>
+        <p className="text-xs text-gray-500 font-mono mb-6">Version 1.5.0</p>
         <p className="text-sm text-gray-300 mb-6 italic">"Designed by Christopher Baker with AI assistance"</p>
         
         <div className="text-[10px] text-gray-500 border-t border-gray-800 pt-4 text-left">
@@ -2874,215 +3433,408 @@ export default function App() {
               <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
 
-            <div className="grid grid-cols-2 gap-6 overflow-y-auto custom-scrollbar pr-2 flex-1">
-              <div className="space-y-4">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1">Video Output Routing</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                  {hardwareDisplays.length === 0 ? ( <div className="text-xs text-gray-500 italic">No hardware API found.</div> ) : (
-                    hardwareDisplays.map(display => (
-                      <label key={display.id} className="flex items-center gap-3 text-sm text-gray-300 cursor-pointer hover:bg-gray-900 p-1.5 rounded transition-colors">
-                        <input type="checkbox" checked={selectedDisplays.includes(display.id)} onChange={(e) => { if (e.target.checked) setSelectedDisplays(prev => [...prev, display.id]); else setSelectedDisplays(prev => prev.filter(id => id !== display.id)); }} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-blue-500 accent-blue-500 cursor-pointer" />
-                        <span className="flex-1 truncate">{display.label} {display.isPrimary && <span className="text-[10px] text-gray-500 ml-1">(Primary)</span>}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
+            {/* Tab Navigation */}
+            <div className="flex border-b border-gray-800 mb-6 shrink-0">
+              <button 
+                onClick={() => setSettingsTab('routing')} 
+                className={`px-4 py-2 text-sm font-bold flex items-center gap-2 transition-colors border-b-2 -mb-[2px] ${
+                  settingsTab === 'routing' 
+                    ? 'border-blue-500 text-blue-400' 
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                <Settings className="w-4 h-4" /> Routing & Sync
+              </button>
+              <button 
+                onClick={() => setSettingsTab('diagnostics')} 
+                className={`px-4 py-2 text-sm font-bold flex items-center gap-2 transition-colors border-b-2 -mb-[2px] ${
+                  settingsTab === 'diagnostics' 
+                    ? 'border-blue-500 text-blue-400' 
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                <Activity className="w-4 h-4" /> Diagnostics & Logs
+              </button>
+            </div>
 
-              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Audio Output Routing</h4>
-              <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Master Audio Device:</label>
-                  <select value={audioOutputDeviceId} onChange={(e) => setAudioOutputDeviceId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 outline-none">
-                    <option value="default">Default System Audio</option>
-                    {audioDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker (${d.deviceId.slice(0,5)}...)`}</option>)}
-                  </select>
-                </div>
-                <label className="flex items-center gap-3 text-sm text-gray-300 cursor-pointer hover:text-white transition-colors">
-                  <input type="checkbox" checked={enableLocalAudio} onChange={(e) => setEnableLocalAudio(e.target.checked)} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-blue-500 accent-blue-500 cursor-pointer" />
-                  <span>Enable Local Audio Playback <span className="text-[10px] text-gray-500 ml-1">(Build Mode)</span></span>
-                </label>
-              </div>
-
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Virtual WebRTC Output Stream</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="flex items-center gap-3 text-sm font-bold text-pink-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={virtualDisplayConfig.enabled} onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, enabled: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-pink-500 accent-pink-500 cursor-pointer" /> Enable WebRTC Output Stream
-                  </label>
-                  <div className="flex items-center gap-4 pl-7 mb-2">
-                    <label className="text-xs text-gray-400">Port:</label>
-                    <input 
-                      type="number" 
-                      value={virtualDisplayConfig.port} 
-                      disabled={!virtualDisplayConfig.enabled} 
-                      onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, port: parseInt(e.target.value) || 8554}))} 
-                      className="w-20 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-pink-500" 
-                    />
-                  </div>
-                  <div className="flex items-center gap-4 pl-7">
-                    <label className="text-xs text-gray-400">Path:</label>
-                    <input 
-                      type="text" 
-                      value={virtualDisplayConfig.path} 
-                      disabled={!virtualDisplayConfig.enabled} 
-                      onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, path: e.target.value}))} 
-                      className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-pink-500" 
-                      placeholder="/display1" 
-                    />
-                  </div>
-                  <div className="mt-3">
-                      <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Security PIN (Optional)</label>
+            {settingsTab === 'diagnostics' ? (
+              <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2 flex-1 min-h-0">
+                {/* Debug Mode Toggle & Sync Status Card */}
+                <div className="grid grid-cols-2 gap-4 shrink-0">
+                  <div className="bg-gray-950 p-4 rounded border border-gray-800 flex flex-col justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-200 mb-1">Debug Mode</h4>
+                      <p className="text-xs text-gray-500 mb-3 font-medium">Enable verbose diagnostics monitoring and console capture.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
                       <input 
-                          type="text" 
-                          placeholder="Leave blank for public access" 
-                          value={virtualDisplayConfig.pin || ''} 
-                          onChange={(e) => setVirtualDisplayConfig({...virtualDisplayConfig, pin: e.target.value})} 
-                          className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" 
+                        type="checkbox" 
+                        checked={debugMode} 
+                        onChange={(e) => setDebugMode(e.target.checked)} 
+                        className="sr-only peer" 
                       />
-                      <p className="text-[9px] text-gray-600 mt-1 italic">
-                          * If set, all remote devices (Deck, Buzzer, Viewer) will be blocked by a PIN pad.
-                      </p>
+                      <div className="w-9 h-5 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white"></div>
+                      <span className="ml-3 text-xs font-bold text-gray-300">{debugMode ? 'VERBOSE DEBUG ON' : 'STANDARD MONITORING'}</span>
+                    </label>
+                  </div>
+
+                  <div className="bg-gray-950 p-4 rounded border border-gray-800 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-200 mb-1">Redundancy Link</h4>
+                      <p className="text-xs text-gray-500 font-medium">UDP state heartbeat link status.</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className={`w-2.5 h-2.5 rounded-full ${
+                          syncMode === 'master' 
+                            ? 'bg-blue-500 animate-pulse' 
+                            : (syncActive ? 'bg-green-500 animate-pulse' : 'bg-gray-600')
+                        }`}></span>
+                        <span className="text-xs font-bold text-gray-300 uppercase font-mono">
+                          {syncMode}: {
+                            syncMode === 'master' 
+                              ? 'BROADCASTING' 
+                              : (syncActive ? 'ACTIVE SYNC' : 'DISCONNECTED / IDLE')
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    <Wifi className={`w-8 h-8 ${
+                      syncMode === 'master' 
+                        ? 'text-blue-400' 
+                        : (syncActive ? 'text-green-500' : 'text-gray-600')
+                    }`} />
                   </div>
                 </div>
 
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Dedicated Receiver Mode</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="flex items-center gap-3 text-sm font-bold text-indigo-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={receiverConfig.enabled} onChange={(e) => {
-                       const enabled = e.target.checked;
-                       setReceiverConfig(prev => ({...prev, enabled}));
-                       if (enabled) {
-                           try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('spawn-receiver', { displayId: receiverConfig.displayId, url: receiverConfig.url }); } catch(err) {}
-                       }
-                    }} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-indigo-500 accent-indigo-500 cursor-pointer" /> Enable Dedicated Receiver Mode
-                  </label>
-                  <div className="flex items-center gap-4 pl-7 mb-2">
-                    <label className="text-xs text-gray-400">Stream URL:</label>
-                    <input list="url-history" type="text" value={receiverConfig.url} onChange={(e) => setReceiverConfig(prev => ({...prev, url: e.target.value}))} onBlur={(e) => handleUrlBlur(e.target.value)} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500" placeholder="webrtc://192.168.0.191:8554/display1" />
+                {/* System & Telemetry Diagnostics */}
+                {diagnostics ? (
+                  <div className="space-y-4 flex-1 flex flex-col min-h-0">
+                    <div className="grid grid-cols-2 gap-4 shrink-0">
+                      {/* Telemetry statistics */}
+                      <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-2">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sync Packet Statistics</h4>
+                        <div className="space-y-1.5 text-xs text-gray-300 font-mono">
+                          <div className="flex justify-between"><span>UDP Port Status:</span><span className="text-blue-400 font-bold">{diagnostics.sync.socketBound ? 'Bound / Listening' : 'Unbound'}</span></div>
+                          <div className="flex justify-between"><span>TCP Tunnel Status:</span><span className="text-blue-400 font-bold">{diagnostics.sync.httpServerRunning ? 'Listening (Port 53002)' : 'Offline'}</span></div>
+                          <div className="flex justify-between"><span>Packets Sent:</span><span>{diagnostics.sync.totalPacketsSent}</span></div>
+                          <div className="flex justify-between"><span>Packets Received:</span><span>{diagnostics.sync.totalPacketsReceived}</span></div>
+                          <div className="flex justify-between">
+                            <span>Last Sent Size:</span>
+                            <span className={diagnostics.sync.lastSentStateSize > 65000 ? 'text-red-500 font-bold animate-pulse' : diagnostics.sync.lastSentStateSize > 1400 ? 'text-yellow-500 font-semibold' : 'text-green-400'}>
+                              {diagnostics.sync.lastSentStateSize} B
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Last Received Size:</span>
+                            <span className={diagnostics.sync.lastReceivedStateSize > 65000 ? 'text-red-500 font-bold animate-pulse' : diagnostics.sync.lastReceivedStateSize > 1400 ? 'text-yellow-500 font-semibold' : 'text-green-400'}>
+                              {diagnostics.sync.lastReceivedStateSize} B
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Staging directory info */}
+                      <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-2">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">TSPack Local Extraction</h4>
+                        <div className="space-y-1.5 text-xs text-gray-300 font-mono">
+                          <div className="flex justify-between"><span>Staging Active:</span><span className="text-blue-400 font-bold">{diagnostics.sync.stagingExists ? 'Active / Mounted' : 'Empty'}</span></div>
+                          <div className="flex justify-between"><span>Total Staging Files:</span><span>{diagnostics.sync.stagingFileCount}</span></div>
+                          <div className="flex justify-between"><span>Total Staging Size:</span><span>{(diagnostics.sync.stagingSize / (1024 * 1024)).toFixed(2)} MB</span></div>
+                          <div className="flex justify-between"><span>Target System IP:</span><span>{localIp}</span></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Network Size Warning Card */}
+                    {(diagnostics.sync.lastSentStateSize > 1400 || diagnostics.sync.lastReceivedStateSize > 1400 || diagnostics.sync.lastSyncError) && (
+                      <div className="bg-yellow-950/40 border border-yellow-800/60 p-3 rounded flex gap-3 items-start shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
+                        <div className="text-xs text-yellow-300">
+                          <h5 className="font-bold mb-0.5">High Packet Payload Detected</h5>
+                          {diagnostics.sync.lastSyncError ? (
+                            <p className="font-mono text-[10px] text-red-400">Error: {diagnostics.sync.lastSyncError}</p>
+                          ) : (
+                            <p className="leading-relaxed font-medium">
+                              Sync payload size ({Math.max(diagnostics.sync.lastSentStateSize, diagnostics.sync.lastReceivedStateSize)} bytes) exceeds the standard Ethernet MTU limit (1400B). Standard UDP packets this large are fragmented and dropped on typical theatrical local networks. When loading a complex TSPack with warp/mask data or high cue counts, syncing the state via UDP will fail.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Log Terminal */}
+                    <div className="flex-1 min-h-[200px] flex flex-col bg-black rounded border border-gray-800 font-mono text-[11px] leading-relaxed overflow-hidden">
+                      <div className="bg-gray-950 px-3 py-1.5 border-b border-gray-800 flex justify-between items-center shrink-0">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Main Process Console Logs</span>
+                        <span className="text-[9px] text-gray-500">Auto-updates in real-time</span>
+                      </div>
+                      <div className="p-3 overflow-y-auto flex-1 space-y-1 custom-scrollbar">
+                        {diagnostics.logs && diagnostics.logs.length > 0 ? (
+                          diagnostics.logs.map((log, index) => {
+                            let color = 'text-gray-400';
+                            if (log.level === 'warn') color = 'text-yellow-400 font-bold';
+                            if (log.level === 'error') color = 'text-red-400 font-bold';
+                            return (
+                              <div key={index} className="flex gap-2 items-start hover:bg-gray-900/50 p-0.5 rounded">
+                                <span className="text-gray-600 select-none shrink-0">[{log.timestamp.slice(11, 19)}]</span>
+                                <span className={`${color} shrink-0 uppercase font-bold text-[9px] w-10`}>{log.level}</span>
+                                <span className="text-gray-200 flex-1 whitespace-pre-wrap">{log.message}</span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-gray-600 italic text-center py-4">No captured main process logs. Try performing sync actions.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-3 mt-2 shrink-0 pb-1">
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const date = new Date().toISOString().replace(/[:.]/g, '-');
+                            const filename = `tuxshow_diagnostics_${date}.json`;
+                            const dataStr = JSON.stringify(diagnostics, null, 2);
+                            const blob = new Blob([dataStr], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            URL.revokeObjectURL(url);
+                            showToast("Diagnostics exported successfully!", "success");
+                          } catch (e) {
+                            showToast("Failed to export diagnostics: " + e.message, "danger");
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white rounded px-4 py-2 text-xs font-bold transition-colors shadow flex items-center gap-2"
+                      >
+                        <Save className="w-4 h-4" /> Export Diagnostic Package
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 pl-7">
-                    <label className="text-xs text-gray-400">Display:</label>
-                    <select value={receiverConfig.displayId} onChange={(e) => setReceiverConfig(prev => ({...prev, displayId: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500">
-                      <option value="primary">Primary Display</option>
-                      {hardwareDisplays.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+                ) : (
+                  <div className="text-gray-500 italic text-center py-12 flex-1">Probing system diagnostics...</div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-6 overflow-y-auto custom-scrollbar pr-2 flex-1">
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1">Video Output Routing</h4>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                    {hardwareDisplays.length === 0 ? ( <div className="text-xs text-gray-500 italic">No hardware API found.</div> ) : (
+                      hardwareDisplays.map(display => (
+                        <label key={display.id} className="flex items-center gap-3 text-sm text-gray-300 cursor-pointer hover:bg-gray-900 p-1.5 rounded transition-colors">
+                          <input type="checkbox" checked={selectedDisplays.includes(display.id)} onChange={(e) => { if (e.target.checked) setSelectedDisplays(prev => [...prev, display.id]); else setSelectedDisplays(prev => prev.filter(id => id !== display.id)); }} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-blue-500 accent-blue-500 cursor-pointer" />
+                          <span className="flex-1 truncate">{display.label} {display.isPrimary && <span className="text-[10px] text-gray-500 ml-1">(Primary)</span>}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Audio Output Routing</h4>
+                <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Master Audio Device:</label>
+                    <select value={audioOutputDeviceId} onChange={(e) => setAudioOutputDeviceId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 outline-none">
+                      <option value="default">Default System Audio</option>
+                      {audioDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker (${d.deviceId.slice(0,5)}...)`}</option>)}
                     </select>
                   </div>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1">Hardware & Network I/O</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="flex items-center gap-3 text-sm font-bold text-cyan-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={ioConfig.oscInput} onChange={(e) => setIoConfig(prev => ({...prev, oscInput: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-cyan-500 accent-cyan-500 cursor-pointer" /> Enable OSC Listener
+                  <label className="flex items-center gap-3 text-sm text-gray-300 cursor-pointer hover:text-white transition-colors">
+                    <input type="checkbox" checked={enableLocalAudio} onChange={(e) => setEnableLocalAudio(e.target.checked)} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-blue-500 accent-blue-500 cursor-pointer" />
+                    <span>Enable Local Audio Playback <span className="text-[10px] text-gray-500 ml-1">(Build Mode)</span></span>
                   </label>
-                  <div className="flex items-center gap-4 pl-7">
-                    <label className="text-xs text-gray-400">Incoming Port:</label>
-                    <input type="number" value={ioConfig.oscPort} disabled={!ioConfig.oscInput} onChange={(e) => setIoConfig(prev => ({...prev, oscPort: parseInt(e.target.value) || 53000}))} className="w-20 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-cyan-500" />
+                </div>
+
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Virtual WebRTC Output Stream</h4>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <label className="flex items-center gap-3 text-sm font-bold text-pink-400 mb-2 cursor-pointer">
+                      <input type="checkbox" checked={virtualDisplayConfig.enabled} onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, enabled: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-pink-500 accent-pink-500 cursor-pointer" /> Enable WebRTC Output Stream
+                    </label>
+                    <div className="flex items-center gap-4 pl-7 mb-2">
+                      <label className="text-xs text-gray-400">Port:</label>
+                      <input 
+                        type="number" 
+                        value={virtualDisplayConfig.port} 
+                        disabled={!virtualDisplayConfig.enabled} 
+                        onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, port: parseInt(e.target.value) || 8554}))} 
+                        className="w-20 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-pink-500" 
+                      />
+                    </div>
+                    <div className="flex items-center gap-4 pl-7">
+                      <label className="text-xs text-gray-400">Path:</label>
+                      <input 
+                        type="text" 
+                        value={virtualDisplayConfig.path} 
+                        disabled={!virtualDisplayConfig.enabled} 
+                        onChange={(e) => setVirtualDisplayConfig(prev => ({...prev, path: e.target.value}))} 
+                        className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-pink-500" 
+                        placeholder="/display1" 
+                      />
+                    </div>
+                    <div className="mt-3">
+                        <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Security PIN (Optional)</label>
+                        <input 
+                            type="text" 
+                            placeholder="Leave blank for public access" 
+                            value={virtualDisplayConfig.pin || ''} 
+                            onChange={(e) => setVirtualDisplayConfig({...virtualDisplayConfig, pin: e.target.value})} 
+                            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" 
+                        />
+                        <p className="text-[9px] text-gray-600 mt-1 italic">
+                            * If set, all remote devices (Deck, Buzzer, Viewer) will be blocked by a PIN pad.
+                        </p>
+                    </div>
+                  </div>
+
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Dedicated Receiver Mode</h4>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <label className="flex items-center gap-3 text-sm font-bold text-indigo-400 mb-2 cursor-pointer">
+                      <input type="checkbox" checked={receiverConfig.enabled} onChange={(e) => {
+                         const enabled = e.target.checked;
+                         setReceiverConfig(prev => ({...prev, enabled}));
+                         if (enabled) {
+                             try { const { ipcRenderer } = window.require('electron'); ipcRenderer.send('spawn-receiver', { displayId: receiverConfig.displayId, url: receiverConfig.url }); } catch(err) {}
+                         }
+                      }} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-indigo-500 accent-indigo-500 cursor-pointer" /> Enable Dedicated Receiver Mode
+                    </label>
+                    <div className="flex items-center gap-4 pl-7 mb-2">
+                      <label className="text-xs text-gray-400">Stream URL:</label>
+                      <input list="url-history" type="text" value={receiverConfig.url} onChange={(e) => setReceiverConfig(prev => ({...prev, url: e.target.value}))} onBlur={(e) => handleUrlBlur(e.target.value)} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500" placeholder="webrtc://192.168.0.191:8554/display1" />
+                    </div>
+                    <div className="flex items-center gap-4 pl-7">
+                      <label className="text-xs text-gray-400">Display:</label>
+                      <select value={receiverConfig.displayId} onChange={(e) => setReceiverConfig(prev => ({...prev, displayId: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-indigo-500">
+                        <option value="primary">Primary Display</option>
+                        {hardwareDisplays.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+                      </select>
+                    </div>
                   </div>
                 </div>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="flex items-center gap-3 text-sm font-bold text-purple-400 mb-2 cursor-pointer">
-                    <input type="checkbox" checked={ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscInput: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-purple-500 accent-purple-500 cursor-pointer" /> Enable MSC (MIDI)
-                  </label>
-                  <div className="flex items-center gap-4 pl-7">
-                    <label className="text-xs text-gray-400">Device Name/ID:</label>
-                    <input type="text" value={ioConfig.mscDevice} disabled={!ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscDevice: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-purple-500" placeholder="e.g. 0 or 'Launchpad'" />
+
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1">Hardware & Network I/O</h4>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <label className="flex items-center gap-3 text-sm font-bold text-cyan-400 mb-2 cursor-pointer">
+                      <input type="checkbox" checked={ioConfig.oscInput} onChange={(e) => setIoConfig(prev => ({...prev, oscInput: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-cyan-500 accent-cyan-500 cursor-pointer" /> Enable OSC Listener
+                    </label>
+                    <div className="flex items-center gap-4 pl-7">
+                      <label className="text-xs text-gray-400">Incoming Port:</label>
+                      <input type="number" value={ioConfig.oscPort} disabled={!ioConfig.oscInput} onChange={(e) => setIoConfig(prev => ({...prev, oscPort: parseInt(e.target.value) || 53000}))} className="w-20 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-cyan-500" />
+                    </div>
                   </div>
-                </div>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <label className="flex items-center gap-3 text-sm font-bold text-purple-400 mb-2 cursor-pointer">
+                      <input type="checkbox" checked={ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscInput: e.target.checked}))} className="w-4 h-4 rounded bg-gray-900 border-gray-700 text-purple-500 accent-purple-500 cursor-pointer" /> Enable MSC (MIDI)
+                    </label>
+                    <div className="flex items-center gap-4 pl-7">
+                      <label className="text-xs text-gray-400">Device Name/ID:</label>
+                      <input type="text" value={ioConfig.mscDevice} disabled={!ioConfig.mscInput} onChange={(e) => setIoConfig(prev => ({...prev, mscDevice: e.target.value}))} className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50 outline-none focus:border-purple-500" placeholder="e.g. 0 or 'Launchpad'" />
+                    </div>
+                  </div>
 
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Multi-Machine Redundancy</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                  <label className="block text-xs text-gray-400 mb-2">Network Role:</label>
-                  <select 
-                      value={syncMode} 
-                      onChange={(e) => setSyncMode(e.target.value)} 
-                      className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
-                  >
-                      <option value="standalone">Standalone (Local Operation Only)</option>
-                      <option value="master">Master (Broadcast Timeline State)</option>
-                      <option value="backup">Backup (Slave to Master over LAN)</option>
-                  </select>
-                  <p className="text-[9px] text-gray-500 mt-2 italic leading-relaxed">
-                      * Master broadcasts UDP heartbeats. Backup listens and instantly slaves its local timeline to match.
-                  </p>
-                  {syncMode === 'master' && (
-                      <div className="mt-4 pt-3 border-t border-gray-800">
-                          <label className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-2">Deploy .TSPack to Backup</label>
-                          <div className="flex gap-2">
-                              <input type="text" id="backup-ip-input" placeholder="Backup IP (e.g. 192.168.1.51)" className="w-1/2 bg-black border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
-                              <button onClick={async (e) => {
-                                  const ip = document.getElementById('backup-ip-input').value;
-                                  if (!ip) return alert('Enter Backup IP Address');
-                                  
-                                  try {
-                                      const { ipcRenderer } = window.require('electron');
-                                      const { canceled, filePaths } = await ipcRenderer.invoke('show-open-dialog', { title: 'Select Pack to Push', filters: [{ name: 'TSPack', extensions: ['TSPack'] }] });
-                                      if (!canceled && filePaths.length > 0) {
-                                          const btn = e.target;
-                                          const originalText = btn.innerText;
-                                          btn.innerText = 'Pushing...';
-                                          btn.disabled = true;
-                                          
-                                          const res = await ipcRenderer.invoke('push-tspack-to-backup', { packPath: filePaths[0], targetIp: ip });
-                                          
-                                          btn.innerText = originalText;
-                                          btn.disabled = false;
-                                          
-                                          if (res.success) alert('Pack successfully deployed and loaded on Backup!');
-                                          else alert('Failed to push pack: ' + res.error);
-                                      }
-                                  } catch (err) {}
-                              }} className="flex-1 bg-blue-900/50 hover:bg-blue-800 border border-blue-700 text-blue-200 rounded px-2 py-1.5 text-xs font-bold transition-colors disabled:opacity-50">
-                                  Select Pack & Push
-                              </button>
-                          </div>
-                      </div>
-                  )}
-                </div>
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Multi-Machine Redundancy</h4>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <label className="block text-xs text-gray-400 mb-2">Network Role:</label>
+                    <select 
+                        value={syncMode} 
+                        onChange={(e) => setSyncMode(e.target.value)} 
+                        className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+                    >
+                        <option value="standalone">Standalone (Local Operation Only)</option>
+                        <option value="master">Master (Broadcast Timeline State)</option>
+                        <option value="backup">Backup (Slave to Master over LAN)</option>
+                    </select>
+                    <p className="text-[9px] text-gray-500 mt-2 italic leading-relaxed">
+                        * Master broadcasts UDP heartbeats. Backup listens and instantly slaves its local timeline to match.
+                    </p>
+                    {syncMode === 'master' && (
+                        <div className="mt-4 pt-3 border-t border-gray-800">
+                            <label className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-2">Deploy .TSPack to Backup</label>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={backupIp} 
+                                    onChange={(e) => setBackupIp(e.target.value)} 
+                                    placeholder="Backup IP (e.g. 192.168.1.51)" 
+                                    className="w-1/2 bg-black border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" 
+                                />
+                                <button onClick={async (e) => {
+                                    if (!backupIp) return alert('Enter Backup IP Address');
+                                    
+                                    try {
+                                        const { ipcRenderer } = window.require('electron');
+                                        const { canceled, filePaths } = await ipcRenderer.invoke('show-open-dialog', { title: 'Select Pack to Push', filters: [{ name: 'TSPack', extensions: ['TSPack'] }] });
+                                        if (!canceled && filePaths.length > 0) {
+                                            const btn = e.target;
+                                            const originalText = btn.innerText;
+                                            btn.innerText = 'Pushing...';
+                                            btn.disabled = true;
+                                            
+                                            const res = await ipcRenderer.invoke('push-tspack-to-backup', { packPath: filePaths[0], targetIp: backupIp });
+                                            
+                                            btn.innerText = originalText;
+                                            btn.disabled = false;
+                                            
+                                            if (res.success) alert('Pack successfully deployed and loaded on Backup!');
+                                            else alert('Failed to push pack: ' + res.error);
+                                        }
+                                    } catch (err) {}
+                                }} className="flex-1 bg-blue-900/50 hover:bg-blue-800 border border-blue-700 text-blue-200 rounded px-2 py-1.5 text-xs font-bold transition-colors disabled:opacity-50">
+                                    Select Pack & Push
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                  </div>
 
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Stream Deck Config</h4>
-                <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-3">
-                  <div className="max-h-60 overflow-y-auto custom-scrollbar pr-2 space-y-2">
-                    {deckConfig.buttons.map((btn, idx) => (
-                      <div key={idx} className="bg-gray-900 border border-gray-700 p-2 rounded relative group">
-                         <button onClick={() => setDeckConfig(prev => ({ buttons: prev.buttons.filter((_, i) => i !== idx) }))} className="absolute top-2 right-2 text-gray-500 hover:text-red-500 hidden group-hover:block"><X className="w-3 h-3" /></button>
-                         <div className="grid grid-cols-2 gap-2 mb-2">
-                            <div>
-                              <label className="block text-[9px] text-gray-500 uppercase">Label</label>
-                              <input type="text" value={btn.label} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].label = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500" />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] text-gray-500 uppercase">OSC Path</label>
-                              <input type="text" value={btn.oscPath} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].oscPath = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
-                            </div>
-                         </div>
-                         <div className="grid grid-cols-3 gap-2">
-                            <div>
-                              <label className="block text-[9px] text-gray-500 uppercase">OSC Args</label>
-                              <input type="text" value={btn.oscArgs || ''} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].oscArgs = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] text-gray-500 uppercase">Color</label>
-                              <div className="flex mt-0.5">
-                                 <input type="color" value={btn.color || '#1f2937'} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].color = e.target.value; return {buttons:n}; })} className="w-6 h-6 p-0 border-none bg-transparent cursor-pointer" />
-                                 <button onClick={() => setDeckConfig(prev => { const n = [...prev.buttons]; delete n[idx].color; return {buttons:n}; })} className="text-[9px] text-gray-500 ml-2 hover:text-gray-300">Clear</button>
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-800 pb-1 mt-4">Stream Deck Config</h4>
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800 space-y-3">
+                    <div className="max-h-60 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+                      {deckConfig.buttons.map((btn, idx) => (
+                        <div key={idx} className="bg-gray-900 border border-gray-700 p-2 rounded relative group">
+                           <button onClick={() => setDeckConfig(prev => ({ buttons: prev.buttons.filter((_, i) => i !== idx) }))} className="absolute top-2 right-2 text-gray-500 hover:text-red-500 hidden group-hover:block"><X className="w-3 h-3" /></button>
+                           <div className="grid grid-cols-2 gap-2 mb-2">
+                              <div>
+                                <label className="block text-[9px] text-gray-500 uppercase">Label</label>
+                                <input type="text" value={btn.label} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].label = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500" />
                               </div>
-                            </div>
-                            <div>
-                              <label className="block text-[9px] text-gray-500 uppercase">Icon</label>
-                              <select value={btn.icon || ''} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].icon = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500">
-                                 <option value="">None</option>
-                                 <option value="play">Play</option><option value="square">Square</option><option value="pause">Pause</option><option value="play-circle">Play Circle</option><option value="skip-back">Skip Back</option><option value="skip-forward">Skip Forward</option><option value="image">Image</option><option value="clock">Clock</option>
-                              </select>
-                            </div>
-                         </div>
-                      </div>
-                    ))}
+                              <div>
+                                <label className="block text-[9px] text-gray-500 uppercase">OSC Path</label>
+                                <input type="text" value={btn.oscPath} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].oscPath = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
+                              </div>
+                           </div>
+                           <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="block text-[9px] text-gray-500 uppercase">OSC Args</label>
+                                <input type="text" value={btn.oscArgs || ''} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].oscArgs = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono" />
+                              </div>
+                              <div>
+                                <label className="block text-[9px] text-gray-500 uppercase">Color</label>
+                                <div className="flex mt-0.5">
+                                   <input type="color" value={btn.color || '#1f2937'} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].color = e.target.value; return {buttons:n}; })} className="w-6 h-6 p-0 border-none bg-transparent cursor-pointer" />
+                                   <button onClick={() => setDeckConfig(prev => { const n = [...prev.buttons]; delete n[idx].color; return {buttons:n}; })} className="text-[9px] text-gray-500 ml-2 hover:text-gray-300">Clear</button>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[9px] text-gray-500 uppercase">Icon</label>
+                                <select value={btn.icon || ''} onChange={(e) => setDeckConfig(prev => { const n = [...prev.buttons]; n[idx].icon = e.target.value; return {buttons:n}; })} className="w-full bg-black border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-blue-500">
+                                   <option value="">None</option>
+                                   <option value="play">Play</option><option value="square">Square</option><option value="pause">Pause</option><option value="play-circle">Play Circle</option><option value="skip-back">Skip Back</option><option value="skip-forward">Skip Forward</option><option value="image">Image</option><option value="clock">Clock</option>
+                                </select>
+                              </div>
+                           </div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => setDeckConfig(prev => ({ buttons: [...prev.buttons, { label: 'NEW', oscPath: '/tuxshow/go', oscArgs: '', color: '', icon: '' }] }))} className="w-full py-1.5 rounded border border-gray-700 hover:bg-gray-800 text-xs font-semibold text-gray-400 transition-colors flex items-center justify-center gap-1"><Plus className="w-3 h-3" /> Add Button</button>
                   </div>
-                  <button onClick={() => setDeckConfig(prev => ({ buttons: [...prev.buttons, { label: 'NEW', oscPath: '/tuxshow/go', oscArgs: '', color: '', icon: '' }] }))} className="w-full py-1.5 rounded border border-gray-700 hover:bg-gray-800 text-xs font-semibold text-gray-400 transition-colors flex items-center justify-center gap-1"><Plus className="w-3 h-3" /> Add Button</button>
                 </div>
               </div>
-            </div>
+            )}
 
       <div className="flex justify-between items-center w-full mt-6 pt-4 border-t border-gray-800 shrink-0">
         <button onClick={() => { setShowSettingsModal(false); setShowAboutModal(true); }} className="px-4 py-2 rounded bg-gray-800 text-gray-400 hover:text-white text-sm font-semibold transition-colors">About</button>
@@ -3174,6 +3926,9 @@ export default function App() {
             stageRef={stageRef} activeMediaCues={activeMediaCues} pins={pins} gridSize={gridSize} 
             stageSize={stageSize} quadW={quadW} quadH={quadH} isMappingMode={isMappingMode} 
             handlePinDrag={handlePinDrag} showStats={showStats} isRecording={isRecording}
+            hardwareDisplays={hardwareDisplays}
+            previewDisplayFilter={previewDisplayFilter}
+            setPreviewDisplayFilter={setPreviewDisplayFilter}
           />
         </div>
         
@@ -3188,10 +3943,34 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar localIp={localIp} virtualDisplayConfig={virtualDisplayConfig} ioConfig={ioConfig} setShowQrModal={setShowQrModal} masterVolumeUI={masterVolumeUI} handleMasterVolumeSlider={handleMasterVolumeSlider} performanceTier={performanceTier} syncMode={syncMode} />
+      <StatusBar localIp={localIp} virtualDisplayConfig={virtualDisplayConfig} ioConfig={ioConfig} setShowQrModal={setShowQrModal} masterVolumeUI={masterVolumeUI} handleMasterVolumeSlider={handleMasterVolumeSlider} performanceTier={performanceTier} syncMode={syncMode} syncActive={syncActive} />
       
       {isPluginManagerOpen && (
         <PluginManagerModal onClose={() => setIsPluginManagerOpen(false)} />
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[9999] max-w-sm flex items-start gap-3 p-4 rounded-lg shadow-2xl border transition-all duration-300 animate-slide-in ${
+          toast.type === 'danger' 
+            ? 'bg-red-950/90 border-red-800/80 text-red-200' 
+            : 'bg-yellow-950/90 border-yellow-800/80 text-yellow-200'
+        }`}>
+          <div className="flex-shrink-0">
+            <AlertTriangle className={`w-5 h-5 ${toast.type === 'danger' ? 'text-red-400' : 'text-yellow-400'}`} />
+          </div>
+          <div className="flex-1 text-xs">
+            <div className="font-bold uppercase tracking-wider mb-0.5">
+              {toast.type === 'danger' ? 'Delivery Failure' : 'Operator Note'}
+            </div>
+            <p className="opacity-90 font-mono">{toast.message}</p>
+          </div>
+          <button 
+            onClick={() => setToast(null)} 
+            className="text-gray-400 hover:text-white transition-colors p-0.5 rounded hover:bg-white/10"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

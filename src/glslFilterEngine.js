@@ -92,14 +92,25 @@ class GLSLFilterEngine {
             const vs = this.compileShader(gl.VERTEX_SHADER, this.DEFAULT_VS);
             const fs = this.compileShader(gl.FRAGMENT_SHADER, fsSource);
             
-            if (!vs || !fs) return this.programCache['default'];
+            if (!vs || !fs) {
+                // If compiling a custom shader failed, ensure 'default' is compiled and return that
+                if (shaderId !== 'default') {
+                    return this.getShaderProgram('default');
+                }
+                return null;
+            }
 
             const program = gl.createProgram();
             gl.attachShader(program, vs);
             gl.attachShader(program, fs);
             gl.linkProgram(program);
             
-            this.programCache[shaderId] = program;
+            this.programCache[shaderId] = {
+                program: program,
+                u_time: gl.getUniformLocation(program, "u_time"),
+                u_resolution: gl.getUniformLocation(program, "u_resolution"),
+                u_image: gl.getUniformLocation(program, "u_image")
+            };
         }
         return this.programCache[shaderId];
     }
@@ -117,7 +128,10 @@ class GLSLFilterEngine {
         const gl = this.gl;
 
         gl.viewport(0, 0, width, height);
-        const program = this.getShaderProgram(shaderId);
+        const programInfo = this.getShaderProgram(shaderId);
+        if (!programInfo) return mediaElement;
+
+        const program = programInfo.program;
         gl.useProgram(program);
 
         // Upload current video/image frame to GPU
@@ -134,6 +148,17 @@ class GLSLFilterEngine {
         gl.enableVertexAttribArray(texLoc);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
         gl.vertexAttribPointer(texLoc, 2, gl.FLOAT, false, 0, 0);
+
+        // Bind uniforms if they exist in the compiled shader
+        if (programInfo.u_time !== null) {
+            gl.uniform1f(programInfo.u_time, performance.now() / 1000.0);
+        }
+        if (programInfo.u_resolution !== null) {
+            gl.uniform2f(programInfo.u_resolution, width, height);
+        }
+        if (programInfo.u_image !== null) {
+            gl.uniform1i(programInfo.u_image, 0);
+        }
 
         // Draw!
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

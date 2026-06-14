@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Activity, ChevronDown, Edit3, Database, Clock, Palette, Maximize, Crop, 
-  Wand2, Type, Hourglass, Bold, Italic, CornerDownRight, Repeat, Wifi, Save, Volume2,
+  Wand2, Type, Hourglass, Bold, Italic, CornerDownRight, Repeat, Wifi, Save, Volume2, SlidersHorizontal,
   Settings2, XSquare, CalendarClock, FolderOpen, GitBranch, X, MonitorUp, Lightbulb, Layers,
-  Play, Pause, Square
+  Play, Pause, Square, Languages, AlertTriangle
 } from 'lucide-react';
 import { ErrorBoundary } from '../ErrorBoundary.jsx';
+import { glslEngine } from './glslFilterEngine.js';
 
 // Local helper for formatting time inside the MediaInfoBox
 const formatTime = (timeInSeconds) => {
@@ -77,9 +78,9 @@ const MediaInfoBox = React.memo(({ cue }) => {
          {(info.type === 'image' || info.type === 'video') && (
            <div className="w-32 bg-black/50 rounded border border-gray-800 flex items-center justify-center shrink-0 z-10 overflow-hidden" title="Media Thumbnail">
               {info.type === 'image' ? (
-                 <img src={cue.url} className="w-full h-full object-contain opacity-80 hover:opacity-100 transition-opacity" alt="Thumb" crossOrigin="anonymous" />
+                 <img src={cue.url} className="w-full h-full object-contain opacity-80 hover:opacity-100 transition-opacity" alt="Thumb" onError={(e) => console.error(`[InspectorPanel] Failed to load image thumbnail from URL: ${cue.url}`, e)} />
               ) : (
-                 <video src={`${cue.url}#t=0.5`} className="w-full h-full object-contain opacity-80 hover:opacity-100 transition-opacity" preload="metadata" crossOrigin="anonymous" />
+                 <video src={`${cue.url}#t=0.5`} className="w-full h-full object-contain opacity-80 hover:opacity-100 transition-opacity" preload="metadata" onError={(e) => console.error(`[InspectorPanel] Failed to load video thumbnail from URL: ${cue.url}`, e)} />
               )}
            </div>
          )}
@@ -198,7 +199,7 @@ const LiveMediaRow = ({ activeCue, setCues }) => {
     );
 };
 
-const PluginAccordion = React.memo(({ plugin, activeCue }) => {
+const PluginAccordion = React.memo(({ plugin, activeCue, cues, setCues, selectedCueIds, updateSelectedCues }) => {
   const [isOpen, setIsOpen] = useState(false);
   const PluginComponent = plugin.renderTab;
 
@@ -218,13 +219,115 @@ const PluginAccordion = React.memo(({ plugin, activeCue }) => {
       {isOpen && (
         <div className="pt-3 border-t border-gray-800 mt-2">
           <ErrorBoundary>
-            <PluginComponent activeCue={activeCue} />
+            <PluginComponent 
+              activeCue={activeCue} 
+              cues={cues}
+              setCues={setCues}
+              selectedCueIds={selectedCueIds}
+              updateSelectedCues={updateSelectedCues}
+            />
           </ErrorBoundary>
         </div>
       )}
     </div>
   );
 });
+
+const parseSubtitleText = (text, extension) => {
+  if (extension === 'csv') {
+    const lines = text.split(/\r?\n/);
+    const parsed = [];
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+      let val = '';
+      if (line.includes(',')) {
+        const parts = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            parts.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        parts.push(current.trim());
+        val = parts[parts.length - 1];
+      } else {
+        val = line;
+      }
+      if (val.startsWith('"') && val.endsWith('"')) {
+        val = val.substring(1, val.length - 1);
+      }
+      val = val.trim();
+      if (val) parsed.push(val);
+    }
+    return parsed;
+  } else {
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rawBlocks = normalized.split(/\n\s*\n/);
+    const parsed = [];
+    for (const block of rawBlocks) {
+      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length === 0) continue;
+      
+      const arrowIndex = lines.findIndex(l => l.includes('-->'));
+      if (arrowIndex !== -1) {
+        const textLines = lines.slice(arrowIndex + 1);
+        if (textLines.length > 0) {
+          parsed.push(textLines.join('\n'));
+        }
+      } else {
+        const firstLine = lines[0].toUpperCase();
+        if (firstLine !== 'WEBVTT' && !/^\d+$/.test(lines[0]) && lines[0].length > 0) {
+          parsed.push(lines.join('\n'));
+        }
+      }
+    }
+    return parsed;
+  }
+};
+
+const areInspectorPropsEqual = (prevProps, nextProps) => {
+  if (prevProps.videoDevices !== nextProps.videoDevices ||
+      prevProps.hardwareDisplays !== nextProps.hardwareDisplays ||
+      prevProps.setShowInspector !== nextProps.setShowInspector) {
+    return false;
+  }
+  const prevSel = prevProps.selectedCueIds || [];
+  const nextSel = nextProps.selectedCueIds || [];
+  if (prevSel.length !== nextSel.length || !prevSel.every((id, i) => id === nextSel[i])) {
+    return false;
+  }
+  for (const id of nextSel) {
+    const prevCue = prevProps.cues.find(c => c.id === id);
+    const nextCue = nextProps.cues.find(c => c.id === id);
+    if (!prevCue || !nextCue) return false;
+    
+    // Compare properties of selected cues
+    const keys = Object.keys(nextCue);
+    for (const key of keys) {
+      if (typeof nextCue[key] === 'object' && nextCue[key] !== null) {
+        if (JSON.stringify(prevCue[key]) !== JSON.stringify(nextCue[key])) {
+          return false;
+        }
+      } else {
+        if (prevCue[key] !== nextCue[key]) {
+          return false;
+        }
+      }
+    }
+  }
+  if (prevProps.activeCues?.length !== nextProps.activeCues?.length) {
+    return false;
+  }
+  return true;
+};
 
 const Inspector = React.memo(function Inspector({ 
   cues, setCues, selectedCueIds, activeCues, isMixed, getSharedVal, updateSelectedCues, 
@@ -233,6 +336,56 @@ const Inspector = React.memo(function Inspector({
 }) {
   const [pluginPanels, setPluginPanels] = useState([]);
   const [inspectorMode, setInspectorMode] = useState('edit'); // 'edit' or 'live'
+  const [focusedFields, setFocusedFields] = useState({});
+  const [localHeaders, setLocalHeaders] = useState('');
+  const [localBody, setLocalBody] = useState('');
+  const [headersError, setHeadersError] = useState(false);
+  const [bodyError, setBodyError] = useState(false);
+
+  const sharedHeaders = getSharedVal('webhookHeaders', '');
+  const sharedBody = getSharedVal('webhookBody', '');
+
+  useEffect(() => {
+    setLocalHeaders(sharedHeaders);
+    setHeadersError(false);
+  }, [sharedHeaders, selectedCueIds]);
+
+  useEffect(() => {
+    setLocalBody(sharedBody);
+    setBodyError(false);
+  }, [sharedBody, selectedCueIds]);
+
+  const handleHeadersChange = (val) => {
+    setLocalHeaders(val);
+    if (!val.trim()) {
+      setHeadersError(false);
+      updateSelectedCues('webhookHeaders', val);
+      return;
+    }
+    try {
+      JSON.parse(val);
+      setHeadersError(false);
+      updateSelectedCues('webhookHeaders', val);
+    } catch (e) {
+      setHeadersError(true);
+    }
+  };
+
+  const handleBodyChange = (val) => {
+    setLocalBody(val);
+    if (!val.trim()) {
+      setBodyError(false);
+      updateSelectedCues('webhookBody', val);
+      return;
+    }
+    try {
+      JSON.parse(val);
+      setBodyError(false);
+      updateSelectedCues('webhookBody', val);
+    } catch (e) {
+      setBodyError(true);
+    }
+  };
 
   useEffect(() => {
     if (window.tuxShowRegistry && window.tuxShowRegistry.subscribe) {
@@ -308,8 +461,34 @@ const Inspector = React.memo(function Inspector({
                           else if (newType === 'dmx') extraProps = { dmxChannel: 1, dmxEndValue: 255, duration: 2.0 };
                           else if (newType === 'sequence') extraProps = { children: [] };
                           else if (newType === 'select') extraProps = { targetCueNumber: c.targetCueNumber || '' };
+                          else if (newType === 'memo') extraProps = { memoColor: c.memoColor || 'yellow' };
+                          else if (newType === 'webhook') extraProps = {
+                            webhookUrl: c.webhookUrl || '',
+                            webhookMethod: c.webhookMethod || 'GET',
+                            webhookHeaders: c.webhookHeaders || '',
+                            webhookBody: c.webhookBody || ''
+                          };
+                          else if (newType === 'surtitle') extraProps = {
+                            surtitleFilePath: c.surtitleFilePath || '',
+                            surtitleLines: c.surtitleLines || [],
+                            currentLineIndex: c.currentLineIndex ?? -1,
+                            textColor: c.textColor || '#ffffff',
+                            textScale: c.textScale || 100,
+                            textAlign: c.textAlign || 'center',
+                            fontFamily: c.fontFamily || 'sans-serif',
+                            fontWeight: c.fontWeight || 'bold',
+                            fontStyle: c.fontStyle || 'normal',
+                            textX: c.textX ?? 50,
+                            textY: c.textY ?? 85,
+                            textShadowEnabled: c.textShadowEnabled ?? true,
+                            textShadowColor: c.textShadowColor || '#000000',
+                            textShadowBlur: c.textShadowBlur ?? 15,
+                            textShadowOffsetX: c.textShadowOffsetX ?? 5,
+                            textShadowOffsetY: c.textShadowOffsetY ?? 5,
+                            duration: c.duration || 0.5
+                          };
                           
-                          if (['video','image','camera','text','timer'].includes(newType)) {
+                          if (['video','image','camera','text','timer','surtitle'].includes(newType)) {
                               extraProps = { ...extraProps, scaleX: c.scaleX ?? 100, scaleY: c.scaleY ?? 100, keepAspect: c.keepAspect ?? true, posX: c.posX ?? 50, posY: c.posY ?? 50, cropTop: c.cropTop ?? 0, cropBottom: c.cropBottom ?? 0, cropLeft: c.cropLeft ?? 0, cropRight: c.cropRight ?? 0, outlineEnabled: c.outlineEnabled ?? false, outlineColor: c.outlineColor ?? '#ffffff', outlineWidth: c.outlineWidth ?? 2, warpEnabled: c.warpEnabled ?? false, warpPins: c.warpPins || [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], shaderBlurRadius: c.shaderBlurRadius ?? 5.0, shaderNoiseIntensity: c.shaderNoiseIntensity ?? 0.5, shaderNoiseSpeed: c.shaderNoiseSpeed ?? 1.0 };
                           }
                           return { ...c, type: newType, url: newUrl, ...extraProps };
@@ -318,7 +497,7 @@ const Inspector = React.memo(function Inspector({
                     }));
                 }} className="flex-1 bg-gray-950 border border-gray-700 focus:border-blue-500 rounded px-2 py-1.5 text-sm text-gray-200 outline-none transition-colors">
                   {isMixed('type') && <option value="mixed" disabled hidden>-- Mixed Types --</option>}
-                  <option value="video">Video Media</option><option value="audio">Audio Only</option><option value="image">Image Graphic</option><option value="camera">Live Capture</option><option value="text">Text / Title</option><option value="timer">Canvas Timer</option><option value="blackout">Stage Blackout</option><option value="pause">Pause Show</option><option value="goto">GoTo Pointer</option><option value="counter">Loop Counter</option><option value="transition">Scene Transition</option><option value="time">Time / Scheduled</option><option value="conditional">Conditional (If/Then)</option><option value="stop">Targeted Stop</option><option value="state-changer">State Changer</option><option value="select">Select Cue (No Fire)</option><option value="msc">MSC (MIDI Show Control)</option><option value="osc">OSC (Open Sound Control)</option><option value="projector">Projector Control</option><option value="dmx">DMX Lighting</option><option value="sequence">Sequence / Timeline</option><option value="group">Group / Folder</option><option value="animate">Animate / Tween</option>
+                  <option value="video">Video Media</option><option value="audio">Audio Only</option><option value="image">Image Graphic</option><option value="camera">Live Capture</option><option value="text">Text / Title</option><option value="timer">Canvas Timer</option><option value="surtitle">Surtitle / Captions</option><option value="blackout">Stage Blackout</option><option value="pause">Pause Show</option><option value="goto">GoTo Pointer</option><option value="counter">Loop Counter</option><option value="transition">Scene Transition</option><option value="time">Time / Scheduled</option><option value="conditional">Conditional (If/Then)</option><option value="stop">Targeted Stop</option><option value="state-changer">State Changer</option><option value="select">Select Cue (No Fire)</option><option value="memo">Memo / Operator Note</option><option value="msc">MSC (MIDI Show Control)</option><option value="osc">OSC (Open Sound Control)</option><option value="projector">Projector Control</option><option value="dmx">DMX Lighting</option><option value="webhook">IoT Webhook</option><option value="sequence">Sequence / Timeline</option><option value="group">Group / Folder</option><option value="animate">Animate / Tween</option>
                 </select>
               </div>
             </div>
@@ -346,7 +525,7 @@ const Inspector = React.memo(function Inspector({
               </label>
             </div>
           
-            {(!['group', 'goto', 'pause', 'counter', 'transition', 'time', 'msc', 'osc', 'stop', 'state-changer', 'conditional', 'select'].includes(getSharedVal('type'))) && (
+            {(!['group', 'goto', 'pause', 'counter', 'transition', 'time', 'msc', 'osc', 'stop', 'state-changer', 'conditional', 'select', 'memo'].includes(getSharedVal('type'))) && (
               <div className="pt-2 border-t border-gray-800">
                 <label className="block text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Output Routing</label>
                 <select value={isMixed('targetDisplay') ? 'mixed' : getSharedVal('targetDisplay', 'all')} onChange={(e) => updateSelectedCues('targetDisplay', e.target.value)} className="w-full bg-blue-950/20 border border-blue-800/40 rounded px-2 py-1.5 text-sm font-mono text-blue-200 outline-none focus:border-blue-500">
@@ -403,6 +582,13 @@ const Inspector = React.memo(function Inspector({
                             <option value="blur">Blur (Gaussian)</option>
                             <option value="noise">Noise / Film Grain</option>
                             <option value="edge">Edge Detection (Sobel)</option>
+                            {glslEngine && Object.keys(glslEngine.customShaders || {}).map(key => {
+                                if (['invert', 'grayscale'].includes(key)) return null;
+                                const label = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                return (
+                                    <option key={key} value={key}>{label}</option>
+                                );
+                            })}
                         </select>
                         
                         {getSharedVal('shaderId') === 'blur' && (
@@ -449,7 +635,115 @@ const Inspector = React.memo(function Inspector({
               </div>
             )}
 
-            {(getSharedVal('type') === 'text' || getSharedVal('type') === 'timer') && (
+            {getSharedVal('type') === 'surtitle' && (
+               <div className="space-y-3 pb-3 border-b border-gray-800 mb-3 animate-fade-in">
+                 <div>
+                   <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider">Load Subtitle File (.srt, .vtt, .csv)</label>
+                   <div className="flex gap-2">
+                     <input 
+                       type="file" 
+                       accept=".srt,.vtt,.csv" 
+                       onChange={(e) => {
+                         const file = e.target.files?.[0];
+                         if (file) {
+                           const reader = new FileReader();
+                           reader.onload = (event) => {
+                             const text = event.target.result;
+                             const ext = file.name.split('.').pop().toLowerCase();
+                             const parsedLines = parseSubtitleText(text, ext);
+                             updateSelectedCues('surtitleFilePath', file.name);
+                             updateSelectedCues('surtitleLines', parsedLines);
+                             updateSelectedCues('currentLineIndex', -1);
+                             
+                             activeCues.forEach(c => {
+                               if (c.name === 'New Cue' || !c.name) {
+                                 updateSelectedCues('name', file.name);
+                               }
+                             });
+                           };
+                           reader.readAsText(file);
+                         }
+                       }}
+                       className="hidden" 
+                       id="surtitle-file-upload" 
+                     />
+                     <label htmlFor="surtitle-file-upload" className="flex-1 text-center bg-gray-950 hover:bg-gray-800 border border-gray-700 hover:border-gray-500 rounded px-2 py-2 text-xs font-mono text-emerald-400 cursor-pointer transition-all flex items-center justify-center gap-1.5">
+                       <FolderOpen className="w-3.5 h-3.5" />
+                       {getSharedVal('surtitleFilePath') ? getSharedVal('surtitleFilePath') : 'Choose Subtitle File...'}
+                     </label>
+                   </div>
+                 </div>
+
+                 <div>
+                   <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider">Crossfade Duration (seconds)</label>
+                   <input 
+                     type="number" 
+                     step="0.1" 
+                     min="0" 
+                     value={isMixed('duration') ? '' : getSharedVal('duration', 0.5)} 
+                     onChange={(e) => updateSelectedCues('duration', parseFloat(e.target.value) || 0)} 
+                     className="w-full bg-gray-950 border border-gray-700 focus:border-emerald-500 rounded px-2 py-1.5 text-sm outline-none text-gray-200" 
+                   />
+                 </div>
+
+                 {getSharedVal('surtitleLines') && getSharedVal('surtitleLines').length > 0 && (
+                   <div>
+                     <div className="flex justify-between items-center mb-1">
+                       <label className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Parsed Subtitle Lines</label>
+                       <span className="text-[9px] font-mono text-gray-500">
+                         {getSharedVal('currentLineIndex', -1) >= 0 ? `Line ${getSharedVal('currentLineIndex') + 1} of ${getSharedVal('surtitleLines').length}` : 'Not Started'}
+                       </span>
+                     </div>
+                     <div className="bg-gray-950 border border-gray-800 rounded h-40 overflow-y-auto custom-scrollbar p-1.5 space-y-1">
+                       {getSharedVal('surtitleLines').map((line, idx) => {
+                         const isActive = getSharedVal('currentLineIndex', -1) === idx;
+                         return (
+                           <div 
+                             key={idx}
+                             onClick={() => updateSelectedCues('currentLineIndex', idx)}
+                             className={`text-xs p-1.5 rounded cursor-pointer transition-colors border select-none ${
+                               isActive 
+                                 ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 font-semibold shadow-[0_0_8px_rgba(16,185,129,0.15)]' 
+                                 : 'bg-gray-900/40 border-transparent text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                             }`}
+                           >
+                             <div className="flex items-start gap-1.5">
+                               <span className={`font-mono text-[9px] px-1 rounded shrink-0 ${isActive ? 'bg-emerald-800/80 text-white' : 'bg-gray-800 text-gray-500'}`}>
+                                 {idx + 1}
+                               </span>
+                               <span className="break-words leading-tight whitespace-pre-wrap">{line}</span>
+                             </div>
+                           </div>
+                         );
+                       })}
+                     </div>
+                     <div className="flex gap-2 mt-2">
+                       <button 
+                         onClick={() => updateSelectedCues('currentLineIndex', -1)} 
+                         className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs py-1.5 rounded border border-gray-700 active:scale-95 transition-all"
+                       >
+                         Reset to Ready
+                       </button>
+                       <button 
+                         onClick={() => {
+                           const curr = getSharedVal('currentLineIndex', -1);
+                           const lines = getSharedVal('surtitleLines', []);
+                           if (curr < lines.length - 1) {
+                             updateSelectedCues('currentLineIndex', curr + 1);
+                           }
+                         }} 
+                         disabled={getSharedVal('currentLineIndex', -1) >= getSharedVal('surtitleLines', []).length - 1}
+                         className="flex-1 bg-emerald-900/50 hover:bg-emerald-800/60 text-emerald-300 disabled:opacity-40 disabled:hover:bg-emerald-900/50 text-xs py-1.5 rounded border border-emerald-800/40 active:scale-95 transition-all"
+                       >
+                         Next Line
+                       </button>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             )}
+
+             {(getSharedVal('type') === 'text' || getSharedVal('type') === 'timer' || getSharedVal('type') === 'surtitle') && (
               <div className="space-y-3">
                 {getSharedVal('type') === 'timer' && (
                   <div className="flex flex-col gap-3 pb-2 border-b border-gray-800 mb-2">
@@ -562,6 +856,45 @@ const Inspector = React.memo(function Inspector({
               </div>
             )}
 
+            {getSharedVal('type') === 'memo' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[10px] text-gray-400 mb-1 font-bold uppercase tracking-wider">Note Color / Level</label>
+                  <select 
+                    value={isMixed('memoColor') ? 'mixed' : getSharedVal('memoColor', 'yellow')} 
+                    onChange={(e) => updateSelectedCues('memoColor', e.target.value)} 
+                    className="w-full bg-gray-950 border border-gray-700 focus:border-yellow-500 rounded px-2 py-1.5 text-sm text-gray-200 outline-none transition-colors"
+                  >
+                    {isMixed('memoColor') && <option value="mixed" disabled hidden>Mixed Colors</option>}
+                    <option value="yellow">Yellow (Attention)</option>
+                    <option value="red">Red (Danger / Standby)</option>
+                    <option value="orange">Orange (Warning)</option>
+                    <option value="blue">Blue (Info)</option>
+                    <option value="green">Green (Safe / Ready)</option>
+                  </select>
+                </div>
+                {(() => {
+                  const mCol = getSharedVal('memoColor', 'yellow');
+                  const colorMap = {
+                    red: { bg: 'bg-red-500/10', border: 'border-red-500/20', text: 'text-red-400', label: 'Danger / Standby' },
+                    orange: { bg: 'bg-orange-500/10', border: 'border-orange-500/20', text: 'text-orange-400', label: 'Warning' },
+                    blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/20', text: 'text-blue-400', label: 'Information' },
+                    green: { bg: 'bg-green-500/10', border: 'border-green-500/20', text: 'text-green-400', label: 'Safe / Ready' },
+                    yellow: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', text: 'text-yellow-400', label: 'Attention / Note' }
+                  };
+                  const style = colorMap[mCol] || colorMap.yellow;
+                  return (
+                    <div className={`p-3 rounded border ${style.bg} ${style.border} space-y-1`}>
+                      <p className={`font-semibold text-xs ${style.text}`}>{style.label} Cue</p>
+                      <p className="text-[11px] text-gray-300 leading-relaxed">
+                        This is an organizational note for the operator. Triggering it immediately passes through and auto-advances to the next cue.
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {getSharedVal('type') === 'goto' && (
               <div className="space-y-3">
                 <div className="flex flex-col gap-3">
@@ -636,6 +969,103 @@ const Inspector = React.memo(function Inspector({
                      <input type="text" placeholder="1, 1.5, start" value={isMixed('oscArgs') ? '' : getSharedVal('oscArgs', '')} onChange={(e)=>updateSelectedCues('oscArgs', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-cyan-500 rounded px-2 py-1.5 text-sm outline-none font-mono" />
                   </div>
                 </div>
+              </div>
+            )}
+
+            {getSharedVal('type') === 'webhook' && (
+              <div className="space-y-3 animate-fade-in mt-4">
+                <div>
+                  <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider flex items-center justify-between">
+                    <span>URL Endpoint</span>
+                    {isMixed('webhookUrl') && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Cues have conflicting URLs" />}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={isMixed('webhookUrl') ? '' : "https://api.example.com/endpoint"}
+                    value={isMixed('webhookUrl') ? (focusedFields['webhookUrl'] ? '' : '<Multiple Values>') : getSharedVal('webhookUrl', '')}
+                    onFocus={() => setFocusedFields(prev => ({ ...prev, webhookUrl: true }))}
+                    onBlur={() => setFocusedFields(prev => ({ ...prev, webhookUrl: false }))}
+                    onChange={(e) => {
+                      if (isMixed('webhookUrl') && !focusedFields['webhookUrl']) return;
+                      updateSelectedCues('webhookUrl', e.target.value);
+                    }}
+                    className={`w-full bg-gray-950 border rounded px-2 py-1.5 text-sm outline-none font-mono transition-colors ${
+                      isMixed('webhookUrl') 
+                        ? (focusedFields['webhookUrl'] ? 'border-emerald-500 text-gray-200' : 'border-amber-600/50 text-amber-500 italic') 
+                        : 'border-gray-700 focus:border-emerald-500 text-gray-200'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider flex items-center justify-between">
+                    <span>HTTP Method</span>
+                    {isMixed('webhookMethod') && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Cues have conflicting methods" />}
+                  </label>
+                  <select
+                    value={isMixed('webhookMethod') ? 'mixed' : getSharedVal('webhookMethod', 'GET')}
+                    onChange={(e) => updateSelectedCues('webhookMethod', e.target.value)}
+                    className={`w-full bg-gray-950 border rounded px-2 py-1.5 text-sm outline-none transition-colors ${
+                      isMixed('webhookMethod') ? 'border-amber-600/50 text-amber-500 italic' : 'border-gray-700 focus:border-emerald-500 text-gray-200'
+                    }`}
+                  >
+                    {isMixed('webhookMethod') && <option value="mixed" disabled hidden>-- Mixed --</option>}
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="PATCH">PATCH</option>
+                    <option value="DELETE">DELETE</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider flex items-center justify-between">
+                    <span>Custom Headers (JSON Object)</span>
+                    {isMixed('webhookHeaders') && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Cues have conflicting headers" />}
+                  </label>
+                  <textarea
+                    placeholder={isMixed('webhookHeaders') ? '' : '{ "Authorization": "Bearer token", "Accept": "application/json" }'}
+                    value={isMixed('webhookHeaders') ? (focusedFields['webhookHeaders'] ? '' : '<Multiple Values>') : (localHeaders !== null ? localHeaders : '')}
+                    onFocus={() => setFocusedFields(prev => ({ ...prev, webhookHeaders: true }))}
+                    onBlur={() => setFocusedFields(prev => ({ ...prev, webhookHeaders: false }))}
+                    onChange={(e) => {
+                      if (isMixed('webhookHeaders') && !focusedFields['webhookHeaders']) return;
+                      handleHeadersChange(e.target.value);
+                    }}
+                    className={`w-full bg-gray-950 border rounded px-2 py-1.5 text-sm outline-none font-mono h-20 resize-y transition-colors ${
+                      headersError 
+                        ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500 text-gray-200' 
+                        : isMixed('webhookHeaders') 
+                          ? (focusedFields['webhookHeaders'] ? 'border-emerald-500 text-gray-200' : 'border-amber-600/50 text-amber-500 italic') 
+                          : 'border-gray-700 focus:border-emerald-500 text-gray-200'
+                    }`}
+                  />
+                  {headersError && <div className="text-[10px] text-red-400 mt-1">⚠️ Invalid JSON format (saving disabled)</div>}
+                </div>
+                {['POST', 'PUT', 'PATCH'].includes(getSharedVal('webhookMethod', 'GET')) && (
+                  <div>
+                    <label className="block text-[10px] text-emerald-400 mb-1 font-bold uppercase tracking-wider flex items-center justify-between">
+                      <span>Request Body (Payload)</span>
+                      {isMixed('webhookBody') && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Cues have conflicting payloads" />}
+                    </label>
+                    <textarea
+                      placeholder={isMixed('webhookBody') ? '' : '{ "status": "on" }'}
+                      value={isMixed('webhookBody') ? (focusedFields['webhookBody'] ? '' : '<Multiple Values>') : (localBody !== null ? localBody : '')}
+                      onFocus={() => setFocusedFields(prev => ({ ...prev, webhookBody: true }))}
+                      onBlur={() => setFocusedFields(prev => ({ ...prev, webhookBody: false }))}
+                      onChange={(e) => {
+                        if (isMixed('webhookBody') && !focusedFields['webhookBody']) return;
+                        handleBodyChange(e.target.value);
+                      }}
+                      className={`w-full bg-gray-950 border rounded px-2 py-1.5 text-sm outline-none font-mono h-24 resize-y transition-colors ${
+                        bodyError 
+                          ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500 text-gray-200' 
+                          : isMixed('webhookBody') 
+                            ? (focusedFields['webhookBody'] ? 'border-emerald-500 text-gray-200' : 'border-amber-600/50 text-amber-500 italic') 
+                            : 'border-gray-700 focus:border-emerald-500 text-gray-200'
+                      }`}
+                    />
+                    {bodyError && <div className="text-[10px] text-red-400 mt-1">⚠️ Invalid JSON format (saving disabled)</div>}
+                  </div>
+                )}
               </div>
             )}
 
@@ -787,10 +1217,14 @@ const Inspector = React.memo(function Inspector({
                     <div className="flex items-center gap-1.5">
                         <button 
                             onClick={async () => {
-                                const { ipcRenderer } = window.require('electron');
-                                const currentData = getSharedVal('children', []);
-                                const result = await ipcRenderer.invoke('save-sequence-snippet', currentData);
-                                if (result.success) console.log('Snippet saved to:', result.filePath);
+                                try {
+                                    const { ipcRenderer } = window.require('electron');
+                                    const currentData = getSharedVal('children', []);
+                                    const result = await ipcRenderer.invoke('save-sequence-snippet', currentData);
+                                    if (result.success) console.log('Snippet saved to:', result.filePath);
+                                } catch (e) {
+                                    console.error("[InspectorPanel] Save snippet failed:", e);
+                                }
                             }}
                             className="px-2 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-700 rounded text-[9px] uppercase font-bold text-gray-300 transition-colors flex items-center gap-1"
                             title="Save as .TSSnip"
@@ -799,12 +1233,16 @@ const Inspector = React.memo(function Inspector({
                         </button>
                         <button 
                             onClick={async () => {
-                                const { ipcRenderer } = window.require('electron');
-                                const result = await ipcRenderer.invoke('load-sequence-snippet');
-                                if (result.success && Array.isArray(result.data)) {
-                                    updateSelectedCues('children', result.data);
-                                } else if (result.error) {
-                                    alert("Failed to load snippet. File may be corrupted.");
+                                try {
+                                    const { ipcRenderer } = window.require('electron');
+                                    const result = await ipcRenderer.invoke('load-sequence-snippet');
+                                    if (result.success && Array.isArray(result.data)) {
+                                        updateSelectedCues('children', result.data);
+                                    } else if (result.error) {
+                                        alert("Failed to load snippet. File may be corrupted.");
+                                    }
+                                } catch (e) {
+                                    console.error("[InspectorPanel] Load snippet failed:", e);
                                 }
                             }}
                             className="px-2 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-700 rounded text-[9px] uppercase font-bold text-gray-300 transition-colors flex items-center gap-1"
@@ -983,7 +1421,7 @@ const Inspector = React.memo(function Inspector({
           <div className="space-y-3 bg-gray-950/40 p-3 rounded border border-gray-800">
             <h4 className="text-[10px] font-bold text-green-500 uppercase tracking-wider flex items-center gap-2 mb-2"><Clock className="w-4 h-4"/> Trigger & Timing</h4>
 
-            {(!['group', 'time', 'osc', 'msc', 'goto', 'counter', 'pause', 'conditional', 'stop', 'state-changer', 'select'].includes(getSharedVal('type'))) && (
+            {(!['group', 'time', 'osc', 'msc', 'goto', 'counter', 'pause', 'conditional', 'stop', 'state-changer', 'select', 'memo'].includes(getSharedVal('type'))) && (
               <div className="flex flex-col gap-3">
                 <div className="flex gap-2">
                   <div className="flex-1">
@@ -1020,6 +1458,36 @@ const Inspector = React.memo(function Inspector({
                    <input type="checkbox" checked={getSharedVal('holdAtEnd', false)} onChange={(e) => updateSelectedCues('holdAtEnd', e.target.checked)} className="w-3.5 h-3.5 bg-gray-900 border-gray-700 rounded text-green-500 focus:ring-green-500" /> 
                    Hold at End
                 </label>
+
+                {['video', 'audio'].includes(getSharedVal('type')) && (
+                  <div className="flex flex-col gap-3 pt-2 border-t border-gray-800">
+                    <div className="flex gap-4 items-center bg-gray-900/30 p-2 rounded border border-gray-800/60">
+                      <div className="flex-1">
+                        <label className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Volume Level</label>
+                        <div className="flex items-center gap-2">
+                          <input type="range" min="0" max="1" step="0.05" value={isMixed('volume') ? 1 : (getSharedVal('volume') ?? 1)} onChange={(e) => updateSelectedCues('volume', parseFloat(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
+                          <span className="text-xs font-mono text-gray-400 w-8 text-right">{isMixed('volume') ? '--' : `${Math.round((getSharedVal('volume') ?? 1) * 100)}%`}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center pt-3">
+                        <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-400 cursor-pointer hover:text-blue-300 transition-colors" title="Loop playback continuously">
+                          <input type="checkbox" checked={getSharedVal('loop', false)} onChange={(e) => updateSelectedCues('loop', e.target.checked)} className="w-3.5 h-3.5 bg-gray-900 border-gray-700 rounded text-blue-500 focus:ring-blue-500" />
+                          Continuous Loop
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col bg-gray-900/30 p-2 rounded border border-gray-800/60">
+                      <label className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Media Sync Offset (ms)</label>
+                      <div className="flex items-center gap-2">
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                        <input type="range" min="-5000" max="5000" step="100" value={isMixed('mediaSyncOffset') ? 0 : (getSharedVal('mediaSyncOffset') || 0)} onChange={(e) => updateSelectedCues('mediaSyncOffset', parseInt(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
+                        <span className="text-xs font-mono text-gray-400 w-10 text-right">{getSharedVal('mediaSyncOffset') || 0}</span>
+                      </div>
+                      <span className="text-[8px] text-gray-600 italic mt-0.5">&gt; 0 skips into track. &lt; 0 delays fire.</span>
+                    </div>
+                  </div>
+                )}
 
                 {getSharedVal('type') !== 'transition' && (
                   <div className="flex gap-2 pt-2 border-t border-gray-800">
@@ -1062,6 +1530,21 @@ const Inspector = React.memo(function Inspector({
                     <label className="block text-[10px] text-green-400 mb-1 font-bold uppercase tracking-wider">Duration (s)</label>
                     <input type="number" step="0.5" min="0" value={isMixed('duration') ? '' : getSharedVal('duration', 0)} placeholder={isMixed('duration') ? '---' : ''} onChange={(e) => updateSelectedCues('duration', parseFloat(e.target.value) || 0)} className="w-full bg-gray-950 border border-gray-700 focus:border-green-500 rounded px-2 py-1.5 text-sm outline-none" />
                   </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-green-400 mb-1 font-bold uppercase tracking-wider">Follow Action</label>
+                    <select value={isMixed('followAction') ? 'mixed' : getSharedVal('followAction', 'none')} onChange={(e) => updateSelectedCues('followAction', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-green-500 rounded px-2 py-1.5 text-sm text-gray-200 outline-none">
+                      {isMixed('followAction') && <option value="mixed" disabled hidden>Mixed Actions</option>}
+                      <option value="none">None (Wait for GO)</option>
+                      <option value="auto-follow">Auto-Follow (Trigger Next)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {getSharedVal('type') === 'memo' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex gap-2 items-center bg-gray-900/50 p-2 rounded border border-gray-800">
                   <div className="flex-1">
                     <label className="block text-[10px] text-green-400 mb-1 font-bold uppercase tracking-wider">Follow Action</label>
                     <select value={isMixed('followAction') ? 'mixed' : getSharedVal('followAction', 'none')} onChange={(e) => updateSelectedCues('followAction', e.target.value)} className="w-full bg-gray-950 border border-gray-700 focus:border-green-500 rounded px-2 py-1.5 text-sm text-gray-200 outline-none">
@@ -1300,12 +1783,42 @@ const Inspector = React.memo(function Inspector({
           
           {/* SECTION 5: REGISTERED PLUGINS */}
           {pluginPanels.map(plugin => (
-            <PluginAccordion key={plugin.id} plugin={plugin} activeCue={activeCues[0]} />
+            <PluginAccordion 
+              key={plugin.id} 
+              plugin={plugin} 
+              activeCue={activeCues[0]} 
+              cues={cues}
+              setCues={setCues}
+              selectedCueIds={selectedCueIds}
+              updateSelectedCues={updateSelectedCues}
+            />
           ))}
           
           </div>
 
-      ) : <div className="flex-1 flex items-center justify-center text-sm text-gray-600">Select a cue to inspect.</div>}
+      ) : (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex items-center justify-center text-sm text-gray-600">
+            Select a cue to inspect.
+          </div>
+          {pluginPanels.length > 0 && (
+            <div className="p-4 border-t border-gray-800 space-y-3 bg-gray-950/20 max-h-[300px] overflow-y-auto custom-scrollbar shrink-0">
+              <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Installed Plugins</h3>
+              {pluginPanels.map(plugin => (
+                <PluginAccordion 
+                  key={plugin.id} 
+                  plugin={plugin} 
+                  activeCue={null}
+                  cues={cues}
+                  setCues={setCues}
+                  selectedCueIds={selectedCueIds}
+                  updateSelectedCues={updateSelectedCues}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
         </>
       )}
 
@@ -1332,6 +1845,6 @@ const Inspector = React.memo(function Inspector({
         )}
     </div>
   );
-});
+}, areInspectorPropsEqual);
 
 export default Inspector;

@@ -1,4 +1,4 @@
-TuxShow V1.4.0: System Architecture & Capability Report
+TuxShow V1.5.0: System Architecture & Capability Report
 1. Executive Summary
 TuxShow is a high-performance, open-source show control and projection mapping system engineered specifically for live theatrical environments. Built on a hybrid technology stack utilizing Electron, React, Node.js, and Vite, TuxShow bridges the gap between modern web technologies and low-level operating system execution. It is designed to deliver robust, frame-accurate video, audio, and lighting playback while maintaining an intuitive cue-list interface tailored for educational theater, stage managers, and digital scenery designers.
 
@@ -12,7 +12,7 @@ The IPC Bridge: Communication between these layers is governed by a secure, cont
 The Timeline Worker: To prevent the main React UI thread from locking up during complex shows, TuxShow offloads show-logic to a dedicated Web Worker (timelineWorker.js). This "Brain" continuously evaluates recursive cue logic, evaluates conditional logic gates (e.g., checking OSC variables at 100ms intervals), and calculates heavy mathematical tweens for animations at 60Hz. It communicates back to the main thread via asynchronous message passing, ensuring the UI remains buttery smooth regardless of show complexity.
 
 3. Network Redundancy & Synchronization
-TuxShow V1.4.0 introduces an enterprise-grade Multi-Machine Redundancy pipeline, ensuring that a hardware failure on the primary control computer does not stop the show.
+TuxShow V1.5.0 introduces an enterprise-grade Multi-Machine Redundancy pipeline, ensuring that a hardware failure on the primary control computer does not stop the show.
 
 UDP Telemetry Sync (The Heartbeat): When configured in "Master" mode, the syncEngine.js module continuously broadcasts the exact timeline state (cue playheads, variables, pausing) over a UDP socket (255.255.255.255:53001). A secondary machine running in "Backup" mode listens to this stream, locking its local UI and slaving its media playback engine to instantly mirror the Master.
 TCP/HTTP Pack Tunneling: To ensure the Backup machine has the exact same media files as the Master, the system utilizes a temporary internal HTTP server on port 53002. The Master can seamlessly deploy a .TSPack archive over the LAN directly to the Backup's staging directory, keeping the machines completely synchronized without manual USB drive transfers.
@@ -42,3 +42,39 @@ The flexible architecture supports several production topologies:
 Standalone (Standard): A single Ubuntu laptop connected via HDMI directly to a projector, handling UI and rendering simultaneously.
 Mission Critical (Redundant): An Ubuntu "Master" machine running the show, connected to a Gigabit network switch alongside an Ubuntu "Backup" machine. Both machines output to video switchers, with the Backup silently slaving to the Master's UDP heartbeats.
 Distributed Network: An Ubuntu machine securely locked in the server rack rendering media, while the Stage Manager runs the show wirelessly from the wings using a Chromebook or iPad connected to the internal WebRTC PWA Deck.
+
+8. Plugin Architecture & Generation Guidelines
+TuxShow supports extensibility through a robust plugin system designed to inject custom frontend UI tabs and run backend server-side processes.
+
+A. Plugin Package Structure
+Plugins are packaged as `.zip` or `.tar.gz` archives and installed to `~/.tuxshow/plugins/[plugin-id]`. Each plugin must contain:
+- `manifest.json`: Configures the plugin metadata, system permission array, backend entry point, and frontend UI entry script.
+- Backend Script (optional): Path defined by `entry` (run via `python3` for `.py` files, or `node` for `.js` files).
+- Frontend Script (optional): Path defined by `entryPoints.ui` (loaded as an ES Module in the app UI head).
+
+B. Frontend & UI Registration
+The frontend script interacts with the UI by registering custom inspector tabs using the global `window.tuxShowRegistry.registerInspectorTab(pluginConfig)` interface:
+- Tab config requires a unique `id`, a friendly `name`, an optional Lucide icon, and a `renderTab` function (rendering JSX inside the InspectorPanel).
+
+C. The Generation Procedure
+The plugin creation workflow utilizes a secure, multi-step pipeline to compile valid code without server-side storage or key exposure:
+1. User Intent Gathering: The React frontend captures user-specified natural language prompts and selected API permissions.
+2. Secure BFF Proxy: A Next.js Serverless function intercepts the prompt, injects strict system prompt constraints and the core API dictionary, and sends it to the LLM.
+3. Client-Side Validation (The Gatekeeper): The browser validates the returned `manifest.json` and `index.js` files to reject illegal DOM references or unrequested/hallucinated permissions.
+4. In-Memory Zipping: Once validated, JSZip constructs the final `.zip` file in the browser memory for local download.
+
+D. Sandboxing & Environmental Constraints
+All generated `index.js` plugin files must adhere to strict sandboxing requirements:
+- Headless Execution: Plugins run in a secure sandbox alongside the core WebGL compositor.
+- No DOM Access: Direct references to `document`, `window`, `document.getElementById`, or `querySelector` are strictly prohibited.
+- Fail-Safe Integrity: Main execution hooks and lifecycle methods (e.g., `init()`, `destroy()`) must be wrapped in `try`/`catch` blocks to prevent crash propagation.
+- Non-Blocking: Must use asynchronous patterns (`async`/`await`) to avoid blocking the single-threaded Node.js event loop.
+
+E. API & Communication Standards
+Plugins communicate with TuxShow FOSS exclusively through a designated Pub/Sub architecture. Hallucinating generic API functions is prohibited. Supported APIs:
+- Event Listening: `core.on(event_name, callback)`
+- Event Dispatching: `core.dispatch(event_name, payload)`
+- Cue Control: `core.cue.fire(index)`
+- Layer Control: `core.layer.modify({ id, opacity, ...properties })`
+- Manifest Strictness: The manifest's permissions array must match the user's checked permissions in the UI with 1:1 precision.
+
