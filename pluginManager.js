@@ -72,6 +72,7 @@ class PluginManager {
 
       const finalDir = path.join(this.pluginsDir, manifest.id);
       if (targetDir !== finalDir) {
+          await fsPromises.rm(finalDir, { recursive: true, force: true });
           await fsPromises.rename(targetDir, finalDir);
       }
 
@@ -138,6 +139,25 @@ class PluginManager {
       plugin.process = null;
     }
     plugin.status = 'disabled';
+    this._notify();
+  }
+
+  async uninstallPlugin(id) {
+    const plugin = this.plugins.get(id);
+    if (!plugin) throw new Error(`Plugin ${id} not found.`);
+
+    // 1. Stop the plugin if it's running
+    await this.stopPlugin(id);
+
+    // 2. Recursively delete the plugin directory
+    if (plugin.dir) {
+      await fsPromises.rm(plugin.dir, { recursive: true, force: true });
+    }
+
+    // 3. Remove it from the Map
+    this.plugins.delete(id);
+
+    // 4. Notify listeners
     this._notify();
   }
 

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+[1.5.1] - 2026-06-17
+
+Added
+
+- **Plugin Uninstallation Feature:** Integrated direct plugin removal via a new "Uninstall" button in the Plugin Manager GUI modal, supported by backend file-system deletion hooks and pre-load IPC API forwards.
+- **Headless PDF Manual Compiler:** Created an automated build compilation script (`compile_manual.js`) that transforms markdown manual pages into formatted HTML and exports them to print-ready PDF files via Electron.
+
+Fixed & Optimized
+
+- **Empty Target Cue Number Matching Bug:** Patched `timelineWorker.js` and `App.jsx` to prevent action cues (Stop, State-Changer, Select, Goto, and Conditionals) with empty target cue parameters from matching folders or unnumbered cues.
+- **Redundancy Sync Failure Protection:** Enclosed JSON payload parsing and file read routines inside syncEngine.js in try/catch blocks to prevent corrupt sync-packs from crashing the main Electron process.
+- **UDP Sync Payload Compression:** Integrated zlib compression (`zlib.deflateSync` and `zlib.inflateSync`) in the multi-machine redundancy broadcast loop, safeguarding synchronization from UDP packet size limits (`EMSGSIZE`).
+- **DMX Input Bounds and NaN Coercion:** Patched `dmxEngine.js` to clamp channels to `[1, 512]` and coerce invalid target/duration values to standard default numbers to prevent glitches.
+- **Plugin Install Directory Collision:** Resolved directory renaming errors (`ENOTEMPTY` on Linux) during plugin updates by clearing existing destination folders before rename.
+- **Webhook Window Destroy Protection:** Added event sender status checking to protect webhook cue delivery handlers from crashes on window closure.
+
 [1.5.0] - 2026-06-11
 
 Added

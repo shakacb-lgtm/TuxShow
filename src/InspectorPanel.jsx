@@ -294,6 +294,9 @@ const parseSubtitleText = (text, extension) => {
 };
 
 const areInspectorPropsEqual = (prevProps, nextProps) => {
+  if (prevProps.customShaders !== nextProps.customShaders) {
+    return false;
+  }
   if (prevProps.videoDevices !== nextProps.videoDevices ||
       prevProps.hardwareDisplays !== nextProps.hardwareDisplays ||
       prevProps.setShowInspector !== nextProps.setShowInspector) {
@@ -332,7 +335,7 @@ const areInspectorPropsEqual = (prevProps, nextProps) => {
 const Inspector = React.memo(function Inspector({ 
   cues, setCues, selectedCueIds, activeCues, isMixed, getSharedVal, updateSelectedCues, 
   getNativeFilePath, videoDevices, hardwareDisplays, setEditingMaskCueId, setEditingWarpCueId,
-  handleUrlBlur, setEditingPathCueId, mediaTimes, setShowInspector
+  handleUrlBlur, setEditingPathCueId, mediaTimes, setShowInspector, customShaders
 }) {
   const [pluginPanels, setPluginPanels] = useState([]);
   const [inspectorMode, setInspectorMode] = useState('edit'); // 'edit' or 'live'
@@ -582,7 +585,7 @@ const Inspector = React.memo(function Inspector({
                             <option value="blur">Blur (Gaussian)</option>
                             <option value="noise">Noise / Film Grain</option>
                             <option value="edge">Edge Detection (Sobel)</option>
-                            {glslEngine && Object.keys(glslEngine.customShaders || {}).map(key => {
+                            {(customShaders || glslEngine.customShaders) && Object.keys(customShaders || glslEngine.customShaders || {}).map(key => {
                                 if (['invert', 'grayscale'].includes(key)) return null;
                                 const label = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                                 return (

@@ -744,7 +744,7 @@ const Header = React.memo(function Header({
         </button>
         <div className="flex flex-col">
           <h1 className="font-bold tracking-widest text-gray-200 leading-tight uppercase">
-            TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control <span className="text-[10px] font-mono text-blue-500 ml-1">v1.5.0</span></span>
+            TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control <span className="text-[10px] font-mono text-blue-500 ml-1">v1.5.1</span></span>
           </h1>
           <span className="text-[9px] text-blue-400/80 font-mono tracking-widest uppercase mt-0.5">{String(gpuStatus)}</span>
         </div>
@@ -1013,9 +1013,15 @@ export default function App() {
       disableCssAnimations: false,
       disableShaders: false
   });
+  const [customShaders, setCustomShaders] = useState({});
   const lastRenderTime = useRef(0);
 
   useEffect(() => {
+      if (isProjector) {
+          setPerformanceTier('high');
+          setPerfFlags({ disableVisualizers: false, previewFps: 60, disableCssAnimations: false, disableShaders: false });
+          return;
+      }
       SystemProfiler.runDiagnostics().then(results => {
           setPerformanceTier(results.recommendedTier);
           if (results.recommendedTier === 'basic') {
@@ -1026,7 +1032,7 @@ export default function App() {
               setPerfFlags({ disableVisualizers: false, previewFps: 60, disableCssAnimations: false, disableShaders: false });
           }
       });
-  }, []);
+  }, [isProjector]);
   
   const [cues, setCues] = useState([
     { id: '0', number: '1', type: 'group', name: 'Pre-Show Sequence', url: '', state: 'stopped', groupMode: 'fire-all', isExpanded: true, groupId: null, targetDisplay: 'all' },
@@ -1204,8 +1210,9 @@ export default function App() {
                     let fadeOutIds = [];
                     resolvedCues.forEach(rc => {
                         if (rc.triggerBehavior === 'fade-target') {
-                            if (rc.fadeTargetCue) {
-                                const target = prevCues.find(c => String(c.number) === String(rc.fadeTargetCue));
+                            const targetNum = String(rc.fadeTargetCue || '').trim();
+                            if (targetNum) {
+                                const target = prevCues.find(c => String(c.number) === targetNum);
                                 if (target) fadeOutIds.push(target.id);
                             } else {
                                 const playingCues = prevCues.filter(c => c.state === 'playing' && !resolvedIds.includes(c.id));
@@ -1272,7 +1279,7 @@ export default function App() {
               script.id = scriptId;
               script.type = 'module';
               const isBrowser = !window.require;
-              const scriptPath = (isBrowser || plugin.dir.startsWith('/'))
+              const scriptPath = isBrowser
                 ? `${plugin.dir}/${plugin.entryPoints.ui}`
                 : `file://${plugin.dir}/${plugin.entryPoints.ui}`.replace(/\\/g, '/');
               script.src = scriptPath;
@@ -2239,8 +2246,14 @@ export default function App() {
       const handleShaderRegistration = (event, { pluginId, shaderConfig }) => {
           console.log(`[App] Received shader: ${shaderConfig.id} from ${pluginId}`);
           glslEngine.updateShader(shaderConfig.id, shaderConfig.fragmentSource);
+          setCustomShaders(prev => ({
+              ...prev,
+              [shaderConfig.id]: shaderConfig.fragmentSource
+          }));
       };
       ipcRenderer.on('tuxshow:shader-registered', handleShaderRegistration);
+
+      ipcRenderer.send('request-shaders');
 
       const handleWebhookError = (event, { error, url }) => {
           console.error(`[Webhook Error] ${error} for ${url}`);
@@ -2296,7 +2309,9 @@ export default function App() {
         ) ? { ...c, state: 'completed' } : c);
         
         actionCues.filter(ac => ac.type === 'stop').forEach(sc => {
-          const target = nextState.find(c => String(c.number) === String(sc.targetCueNumber).trim());
+          const targetNum = String(sc.targetCueNumber || '').trim();
+          if (!targetNum) return;
+          const target = nextState.find(c => String(c.number) === targetNum);
           if (target && (target.state === 'playing' || target.state === 'stopping')) {
             const getDescendantIds = (parentId, list) => {
                 let ids = [];
@@ -2320,7 +2335,9 @@ export default function App() {
           if (sc.stateChangeMode === 'default-all') {
             nextState = nextState.map(c => ({ ...c, lockedBy: null, disabled: false }));
           } else {
-            const target = nextState.find(c => String(c.number) === String(sc.targetCueNumber).trim());
+            const targetNum = String(sc.targetCueNumber || '').trim();
+            if (!targetNum) return;
+            const target = nextState.find(c => String(c.number) === targetNum);
             if (target) {
               const getDescendantIds = (parentId, list) => {
                   let ids = [];
@@ -2346,7 +2363,9 @@ export default function App() {
         });
 
         actionCues.filter(ac => ac.type === 'select').forEach(sc => {
-          const target = nextState.find(c => String(c.number) === String(sc.targetCueNumber).trim());
+          const targetNum = String(sc.targetCueNumber || '').trim();
+          if (!targetNum) return;
+          const target = nextState.find(c => String(c.number) === targetNum);
           if (target) {
             setTimeout(() => {
               setSelectedCueIds([target.id]);
@@ -3296,7 +3315,7 @@ export default function App() {
            <span className="text-3xl font-black text-blue-500">T</span>
         </div>
         <h2 className="text-xl font-bold text-white mb-1">TuxShow</h2>
-        <p className="text-xs text-gray-500 font-mono mb-6">Version 1.5.0</p>
+        <p className="text-xs text-gray-500 font-mono mb-6">Version 1.5.1</p>
         <p className="text-sm text-gray-300 mb-6 italic">"Designed by Christopher Baker with AI assistance"</p>
         
         <div className="text-[10px] text-gray-500 border-t border-gray-800 pt-4 text-left">
@@ -3938,7 +3957,7 @@ export default function App() {
             isMixed={isMixed} getSharedVal={getSharedVal} updateSelectedCues={updateSelectedCues} 
             getNativeFilePath={getNativeFilePath} videoDevices={videoDevices} hardwareDisplays={hardwareDisplays} urlHistory={urlHistory}
             setEditingMaskCueId={setEditingMaskCueId} setEditingWarpCueId={setEditingWarpCueId} handleUrlBlur={handleUrlBlur} setEditingPathCueId={setEditingPathCueId}
-            mediaTimes={mediaTimes} setShowInspector={setShowInspector}
+            mediaTimes={mediaTimes} setShowInspector={setShowInspector} customShaders={customShaders}
           />
         )}
       </div>

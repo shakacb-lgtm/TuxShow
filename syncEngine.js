@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { exec } from 'child_process';
+import zlib from 'zlib';
 
 class SyncEngine {
     constructor() {
@@ -80,7 +81,17 @@ class SyncEngine {
                 try {
                     this.totalPacketsReceived++;
                     this.lastReceivedStateSize = msg.length;
-                    const payload = JSON.parse(msg.toString());
+                    
+                    let payloadStr;
+                    if (msg[0] === 0x78) {
+                        payloadStr = zlib.inflateSync(msg).toString();
+                    } else if (msg[0] === 0x1f && msg[1] === 0x8b) {
+                        payloadStr = zlib.gunzipSync(msg).toString();
+                    } else {
+                        payloadStr = msg.toString();
+                    }
+                    
+                    const payload = JSON.parse(payloadStr);
                     if (payload.type === 'heartbeat') {
                         if (this.webContents && !this.webContents.isDestroyed()) {
                             this.webContents.send('network-sync-heartbeat', payload);
@@ -139,24 +150,29 @@ class SyncEngine {
 
                                 const showJsonPath = path.join(syncDir, 'show.json');
                                 if (fs.existsSync(showJsonPath)) {
-                                    const showData = JSON.parse(fs.readFileSync(showJsonPath, 'utf8'));
-                                    
-                                    // Rewrite relative ./media paths to absolute /tmp paths for the local engine
-                                    if (showData.cues) {
-                                        showData.cues = showData.cues.map(c => {
-                                            if (c.url && c.url.startsWith('./media/')) {
-                                                const newUrl = path.join(syncDir, 'media', c.url.replace('./media/', ''));
-                                                return { ...c, url: 'file://' + newUrl.replace(/\\/g, '/') };
-                                            }
-                                            return c;
-                                        });
+                                    try {
+                                        const showData = JSON.parse(fs.readFileSync(showJsonPath, 'utf8'));
+                                        
+                                        // Rewrite relative ./media paths to absolute /tmp paths for the local engine
+                                        if (showData.cues) {
+                                            showData.cues = showData.cues.map(c => {
+                                                if (c.url && c.url.startsWith('./media/')) {
+                                                    const newUrl = path.join(syncDir, 'media', c.url.replace('./media/', ''));
+                                                    return { ...c, url: 'file://' + newUrl.replace(/\\/g, '/') };
+                                                }
+                                                return c;
+                                            });
+                                        }
+                                        
+                                        if (this.webContents && !this.webContents.isDestroyed()) {
+                                            this.webContents.send('network-pack-received', showData);
+                                        }
+                                        res.writeHead(200);
+                                        res.end('Pack applied successfully.');
+                                    } catch (parseErr) {
+                                        console.error('[SyncEngine] Failed to parse show.json:', parseErr);
+                                        res.writeHead(500); res.end('Failed to parse show.json: ' + parseErr.message);
                                     }
-                                    
-                                    if (this.webContents && !this.webContents.isDestroyed()) {
-                                        this.webContents.send('network-pack-received', showData);
-                                    }
-                                    res.writeHead(200);
-                                    res.end('Pack applied successfully.');
                                 } else {
                                     res.writeHead(500); res.end('show.json not found in pack.');
                                 }
@@ -217,11 +233,12 @@ class SyncEngine {
             }
 
             const message = Buffer.from(JSON.stringify(slimPayload));
-            this.lastSentStateSize = message.length;
+            const compressed = zlib.deflateSync(message);
+            this.lastSentStateSize = compressed.length;
             this.totalPacketsSent++;
-            this.socket.send(message, 0, message.length, this.port, this.broadcastIp);
+            this.socket.send(compressed, 0, compressed.length, this.port, this.broadcastIp);
             if (this.backupIp && this.backupIp.trim() !== '') {
-                this.socket.send(message, 0, message.length, this.port, this.backupIp.trim());
+                this.socket.send(compressed, 0, compressed.length, this.port, this.backupIp.trim());
             }
         } catch (e) {
             console.error('[SyncEngine] Failed to broadcast state:', e);

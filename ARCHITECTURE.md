@@ -1,4 +1,4 @@
-TuxShow V1.5.0: System Architecture & Capability Report
+TuxShow V1.5.1: System Architecture & Capability Report
 1. Executive Summary
 TuxShow is a high-performance, open-source show control and projection mapping system engineered specifically for live theatrical environments. Built on a hybrid technology stack utilizing Electron, React, Node.js, and Vite, TuxShow bridges the gap between modern web technologies and low-level operating system execution. It is designed to deliver robust, frame-accurate video, audio, and lighting playback while maintaining an intuitive cue-list interface tailored for educational theater, stage managers, and digital scenery designers.
 
@@ -12,7 +12,7 @@ The IPC Bridge: Communication between these layers is governed by a secure, cont
 The Timeline Worker: To prevent the main React UI thread from locking up during complex shows, TuxShow offloads show-logic to a dedicated Web Worker (timelineWorker.js). This "Brain" continuously evaluates recursive cue logic, evaluates conditional logic gates (e.g., checking OSC variables at 100ms intervals), and calculates heavy mathematical tweens for animations at 60Hz. It communicates back to the main thread via asynchronous message passing, ensuring the UI remains buttery smooth regardless of show complexity.
 
 3. Network Redundancy & Synchronization
-TuxShow V1.5.0 introduces an enterprise-grade Multi-Machine Redundancy pipeline, ensuring that a hardware failure on the primary control computer does not stop the show.
+TuxShow V1.5.1 introduces an enterprise-grade Multi-Machine Redundancy pipeline, ensuring that a hardware failure on the primary control computer does not stop the show.
 
 UDP Telemetry Sync (The Heartbeat): When configured in "Master" mode, the syncEngine.js module continuously broadcasts the exact timeline state (cue playheads, variables, pausing) over a UDP socket (255.255.255.255:53001). A secondary machine running in "Backup" mode listens to this stream, locking its local UI and slaving its media playback engine to instantly mirror the Master.
 TCP/HTTP Pack Tunneling: To ensure the Backup machine has the exact same media files as the Master, the system utilizes a temporary internal HTTP server on port 53002. The Master can seamlessly deploy a .TSPack archive over the LAN directly to the Backup's staging directory, keeping the machines completely synchronized without manual USB drive transfers.

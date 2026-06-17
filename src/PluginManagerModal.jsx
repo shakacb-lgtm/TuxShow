@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Archive, Power, ShieldAlert, Cpu, AlertCircle } from 'lucide-react';
+import { X, Archive, Power, ShieldAlert, Cpu, AlertCircle, Trash2 } from 'lucide-react';
 
 export default function PluginManagerModal({ onClose }) {
   const [plugins, setPlugins] = useState([]);
@@ -35,6 +35,19 @@ export default function PluginManagerModal({ onClose }) {
   const handleToggle = async (id, currentStatus) => {
     const isEnabled = currentStatus === 'running' || currentStatus === 'waiting';
     await window.coreAppAPI.togglePluginState(id, !isEnabled);
+  };
+
+  const handleUninstall = async (id) => {
+    if (!window.confirm("Are you sure you want to uninstall this plugin? This will permanently delete its directory and code.")) return;
+    setErrorMsg(null);
+    try {
+      const result = await window.coreAppAPI.uninstallPlugin(id);
+      if (!result.success) {
+        setErrorMsg(result.error);
+      }
+    } catch (err) {
+      setErrorMsg(err.message);
+    }
   };
 
   const getStatusIndicator = (status) => {
@@ -97,6 +110,9 @@ export default function PluginManagerModal({ onClose }) {
                     {getStatusIndicator(plugin.status)}
                     <button onClick={() => handleToggle(plugin.id, plugin.status)} className={`w-full py-2 rounded flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${(plugin.status === 'running' || plugin.status === 'waiting') ? 'bg-red-900/50 hover:bg-red-800 text-red-400 hover:text-white border border-red-800' : 'bg-green-900/50 hover:bg-green-800 text-green-400 hover:text-white border border-green-800'}`}>
                       <Power className="w-3 h-3" /> {(plugin.status === 'running' || plugin.status === 'waiting') ? 'Kill Switch' : 'Start'}
+                    </button>
+                    <button onClick={() => handleUninstall(plugin.id)} className="w-full py-1.5 rounded flex items-center justify-center gap-1.5 text-gray-500 hover:text-red-400 hover:bg-red-950/20 text-[10px] font-bold uppercase border border-gray-800 hover:border-red-900/30 transition-all cursor-pointer">
+                      <Trash2 className="w-3 h-3" /> Uninstall
                     </button>
                   </div>
                   <div className="flex-1 flex flex-col justify-center">

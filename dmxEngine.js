@@ -37,10 +37,20 @@ class DMXEngine {
   fadeChannel(channel, endValue, durationMs) {
     if (!this.isRunning) this.start();
     const ch = parseInt(channel);
-    const target = Math.max(0, Math.min(255, Math.floor(endValue)));
+    if (isNaN(ch) || ch < 1 || ch > 512) {
+      console.warn(`[DMX Engine] Invalid DMX channel input: ${channel}`);
+      return;
+    }
     
+    let target = parseFloat(endValue);
+    if (isNaN(target)) target = 0;
+    target = Math.max(0, Math.min(255, Math.floor(target)));
+    
+    let duration = parseFloat(durationMs);
+    if (isNaN(duration) || duration < 0) duration = 0;
+
     // Instant snap
-    if (durationMs <= 0) {
+    if (duration <= 0) {
         this.universeData[ch - 1] = target;
         delete this.fades[ch];
         return;
@@ -48,10 +58,10 @@ class DMXEngine {
 
     // Setup smooth mathematical fade
     this.fades[ch] = {
-        startValue: this.universeData[ch - 1],
+        startValue: this.universeData[ch - 1] || 0,
         endValue: target,
         startTime: Date.now(),
-        durationMs
+        durationMs: duration
     };
   }
 

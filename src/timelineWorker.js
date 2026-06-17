@@ -30,7 +30,12 @@ const evaluateCue = (cueId, currentCues, depth = 0) => {
         if (cue.gotoMode === 'random') {
             const val1 = parseFloat(cue.targetCueRangeMin); const val2 = parseFloat(cue.targetCueRangeMax);
             if (!isNaN(val1) && !isNaN(val2)) { const validCues = currentCues.filter(c => { const num = parseFloat(c.number); return !isNaN(num) && num >= Math.min(val1, val2) && num <= Math.max(val1, val2); }); if (validCues.length > 0) return evaluateCue(validCues[Math.floor(Math.random() * validCues.length)].id, currentCues, depth + 1); } return [];
-        } else { const target = currentCues.find(c => String(c.number) === String(cue.targetCueNumber)); return target ? evaluateCue(target.id, currentCues, depth + 1) : []; }
+        } else {
+            const targetNum = String(cue.targetCueNumber || '').trim();
+            if (!targetNum) return [];
+            const target = currentCues.find(c => String(c.number) === targetNum);
+            return target ? evaluateCue(target.id, currentCues, depth + 1) : [];
+        }
     }
     if (cue.type === 'counter') return [cue]; 
     if (cue.type === 'conditional') {
@@ -40,11 +45,13 @@ const evaluateCue = (cueId, currentCues, depth = 0) => {
             const val = oscValues[cue.conditionOscPath];
             if (val !== undefined && val !== null && String(val) === String(cue.conditionOscValue)) conditionMet = true;
         } else {
-            const target = currentCues.find(c => String(c.number) === String(cue.conditionTargetCue));
+            const targetNum = String(cue.conditionTargetCue || '').trim();
+            const target = targetNum ? currentCues.find(c => String(c.number) === targetNum) : null;
             if (target && target.state === (cue.conditionState || 'playing')) conditionMet = true;
         }
-        const nextNum = conditionMet ? cue.trueTargetCue : cue.falseTargetCue;
-        const nextCue = currentCues.find(c => String(c.number) === String(nextNum));
+        const nextNum = String(conditionMet ? (cue.trueTargetCue || '') : (cue.falseTargetCue || '')).trim();
+        if (!nextNum) return [];
+        const nextCue = currentCues.find(c => String(c.number) === nextNum);
         return nextCue ? evaluateCue(nextCue.id, currentCues, depth + 1) : [];
     }
     if (cue.type === 'group') {
@@ -120,7 +127,8 @@ setInterval(() => {
                 consumedOscPaths.push(cue.conditionOscPath);
             }
         } else {
-            const target = cues.find(c => String(c.number) === String(cue.conditionTargetCue));
+            const targetNum = String(cue.conditionTargetCue || '').trim();
+            const target = targetNum ? cues.find(c => String(c.number) === targetNum) : null;
             if (target && target.state === (cue.conditionState || 'playing')) conditionMet = true;
         }
 
@@ -132,8 +140,9 @@ setInterval(() => {
             const localCue = cues.find(c => String(c.id) === String(cue.id));
             if (localCue) localCue.state = 'stopped';
             
-            if (cue.trueTargetCue) {
-                const targetCue = cues.find(c => String(c.number) === String(cue.trueTargetCue));
+            const nextNum = String(cue.trueTargetCue || '').trim();
+            if (nextNum) {
+                const targetCue = cues.find(c => String(c.number) === nextNum);
                 if (targetCue) resolvedCues.push(...evaluateCue(targetCue.id, cues));
             }
         }
@@ -225,7 +234,9 @@ setInterval(() => {
                 const mainThreadNow = localNow - mainThreadTimeOffset;
                 let p = (mainThreadNow - (tracker.animStart || tracker.start)) / (anim.duration * 1000);
                 p = Math.max(0, Math.min(1, p));
-                const currentVal = anim.animStartValue + (anim.animEndValue - anim.animStartValue) * p;
+                const startVal = parseFloat(anim.animStartValue) || 0;
+                const endVal = parseFloat(anim.animEndValue) || 0;
+                const currentVal = startVal + (endVal - startVal) * p;
                 if (!animModifiers[anim.animTargetCue]) animModifiers[anim.animTargetCue] = {};
                 animModifiers[anim.animTargetCue][anim.animProperty] = currentVal;
             }

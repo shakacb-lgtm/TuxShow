@@ -105,6 +105,7 @@ const coreAppAPI = {
   installPluginArchive: () => ipcRenderer.invoke('plugin-install-archive'),
   togglePluginState: (pluginId, isEnabled) => ipcRenderer.invoke('plugin-toggle-state', pluginId, isEnabled),
   getLoadedPlugins: () => ipcRenderer.invoke('plugin-get-loaded'),
+  uninstallPlugin: (pluginId) => ipcRenderer.invoke('plugin-uninstall', pluginId),
   onPluginStateChanged: (callback) => {
     const handler = (_event, plugins) => callback(plugins);
     ipcRenderer.on('plugin-state-changed', handler);

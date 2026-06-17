@@ -82,6 +82,7 @@ let receiverWindow = null;
 let deckClients = [];
 let deckConfig = { buttons: [] };
 let lastKnownState = null;
+let registeredShaders = [];
 
 let oscServerInstance = null;
 let OSCClient = null;
@@ -1064,6 +1065,15 @@ function createWindow() {
     return pluginManager.getLoadedPlugins();
   });
 
+  ipcMain.handle('plugin-uninstall', async (event, id) => {
+    try {
+      await pluginManager.uninstallPlugin(id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // =======================================================================
   // TUXSHOW PLUG-IN EXTENSIBILITY IPC HANDLERS
   // =======================================================================
@@ -1080,10 +1090,27 @@ function createWindow() {
 
   ipcMain.on('tuxshow:registerShader', (event, { pluginId, shaderConfig }) => {
     console.log(`[Plugin System] Registered shader effect from ${pluginId}`);
+    
+    // Cache the shader
+    if (!registeredShaders.some(s => s.shaderConfig.id === shaderConfig.id)) {
+      registeredShaders.push({ pluginId, shaderConfig });
+    }
+
     // Forward to the renderer to compile into the WebGL pipeline
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('tuxshow:shader-registered', { pluginId, shaderConfig });
     }
+    projectorWindows.forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('tuxshow:shader-registered', { pluginId, shaderConfig });
+      }
+    });
+  });
+
+  ipcMain.on('request-shaders', (event) => {
+    registeredShaders.forEach(({ pluginId, shaderConfig }) => {
+      event.sender.send('tuxshow:shader-registered', { pluginId, shaderConfig });
+    });
   });
 
   ipcMain.on('tuxshow:writeLog', (event, { pluginId, level, message }) => {
@@ -1144,7 +1171,9 @@ function createWindow() {
 
   ipcMain.on('fire-webhook-cue', (event, { url, method, headers, body }) => {
     if (!url) {
-      event.sender.send('webhook-error', { error: 'URL Endpoint is required', url: '' });
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('webhook-error', { error: 'URL Endpoint is required', url: '' });
+      }
       return;
     }
     try {
@@ -1172,16 +1201,22 @@ function createWindow() {
       })
       .then(res => {
         if (!res.ok) {
-          event.sender.send('webhook-error', { error: `HTTP Status Code: ${res.status} ${res.statusText}`, url });
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('webhook-error', { error: `HTTP Status Code: ${res.status} ${res.statusText}`, url });
+          }
         }
         console.log(`[TuxShow Webhook] Triggered: ${method || 'GET'} ${url} -> Status ${res.status}`);
       })
       .catch(err => {
-        event.sender.send('webhook-error', { error: `Network connection failed: ${err.message}`, url });
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('webhook-error', { error: `Network connection failed: ${err.message}`, url });
+        }
         console.error(`[TuxShow Webhook] Error triggering: ${method || 'GET'} ${url} ->`, err.message);
       });
     } catch (err) {
-      event.sender.send('webhook-error', { error: err.message, url });
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('webhook-error', { error: err.message, url });
+      }
       console.error(`[TuxShow Webhook] Error in webhook cue execution:`, err.message);
     }
   });

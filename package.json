@@ -1,7 +1,7 @@
 {
   "name": "tuxshow",
   "productName": "TuxShow",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Projection Mapping and Show Control",
   "author": "Christopher Baker <tuxshowscpm@gmail.com>",
   "homepage": "https://github.com/shakacb-lgtm/TuxShow",

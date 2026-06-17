@@ -1,7 +1,7 @@
-# TuxShow v1.5.0: The Official Technical Manual
+# TuxShow v1.5.1: The Official Technical Manual
 ### A Complete Guide for End-Users and IT Administrators in Live Performance
 
-Welcome to TuxShow v1.5.0. If you are reading this, you are likely responsible for ensuring that a live audience experiences a flawless show. In the booth, there is no room for lag, crashed displays, or network intruders.
+Welcome to TuxShow v1.5.1. If you are reading this, you are likely responsible for ensuring that a live audience experiences a flawless show. In the booth, there is no room for lag, crashed displays, or network intruders.
 
 This manual is written with a strict philosophy: **"Student-proof the booth, protect the show."** We cover everything from low-level audio routing and IPC boundaries to practical script execution and emergency booth communications.
 
@@ -9,7 +9,7 @@ This manual is written with a strict philosophy: **"Student-proof the booth, pro
 
 ## Chapter 1: System Environments & IT Administrator Guide
 
-TuxShow v1.5.0 introduces major architectural designs to guarantee stability across vastly different hardware environments—from beefy gaming laptops to aging school-issued desktops.
+TuxShow v1.5.1 introduces major architectural designs to guarantee stability across vastly different hardware environments—from beefy gaming laptops to aging school-issued desktops.
 
 ### 1.1 Deployment & The Windows WSLg Framework
 While native to Linux, TuxShow runs flawlessly on Windows via the Windows Subsystem for Linux (WSL). For IT administrators deploying on Windows machines, use the standard WSLg graphical architecture. From an elevated PowerShell prompt:
@@ -18,14 +18,14 @@ wsl --install
 ```
 Once Ubuntu is installed, run the standard TuxShow `.deb` package. WSLg passes the Linux WebGL acceleration directly to the native Windows GPU drivers, ensuring zero-latency projection output.
 
-### 1.2 The v1.5.0 System Profiler
-Educational theater hardware is unpredictable. TuxShow v1.5.0 features a boot-time diagnostic module that scans the host machine's GPU and RAM. It automatically locks the engine into one of three performance tiers to prevent mid-show thermal throttling:
+### 1.2 The v1.5.1 System Profiler
+Educational theater hardware is unpredictable. TuxShow v1.5.1 features a boot-time diagnostic module that scans the host machine's GPU and RAM. It automatically locks the engine into one of three performance tiers to prevent mid-show thermal throttling:
 * **High (60fps)**: Requires dedicated GPU. Unlocked multi-layered 1080p WebGL effects.
 * **Balanced (30fps)**: Standard for integrated graphics. Perfect for standard crossfades and audio-only playback.
 * **Basic (15fps)**: Engages automatically on low-RAM devices (e.g., older Raspberry Pis). Prioritizes audio sync and hard-cuts over visual transition smoothing.
 
 ### 1.3 Secure IPC Bridge Boundary
-To protect the booth from rendering crashes, v1.5.0 completely isolates the React user interface from the underlying execution systems.
+To protect the booth from rendering crashes, v1.5.1 completely isolates the React user interface from the underlying execution systems.
 
 The `coreAppAPI` and `tuxShowAPI` act as an Inter-Process Communication (IPC) bridge. If the UI thread stutters while rendering a complex cue list, the backend `timelineWorker.js` remains completely insulated, ensuring your audio and video cues continue firing with frame-accurate precision.
 
@@ -46,7 +46,7 @@ The interface is built for the dark. Everything critical is accessible via tacti
 * **Hard-Stop**: Halts a specific cue immediately, dumping it from system memory. If programmed as a transition, it instantly fires the next cue.
 * **Panic Button (`!`)**: The emergency eject. Executes a global 1.5-second fade-out on all visual and audio elements, bringing the stage to true black and silence.
 * **Record Button (`REC`)**: Captures the live Master Projection WebGL Canvas along with mixed playback audio (both video and audio cues) and records a native WebM video file directly to the local hard drive. Bypasses booth monitoring states: even if local audio monitoring is muted, the Web Audio API routes the playback streams directly to the WebM file's audio track to ensure a complete visual and auditory archive of the show.
-* **Operator Warning Toasts (New in 1.5.0)**: Displays instant, floating alert notifications in the bottom-right corner when hardware cues (like webhooks) fail to deliver, ensuring the operator knows of issues instantly without digging in logs.
+* **Operator Warning Toasts (New in 1.5.1)**: Displays instant, floating alert notifications in the bottom-right corner when hardware cues (like webhooks) fail to deliver, ensuring the operator knows of issues instantly without digging in logs.
 
 > 🎧 **[BOOTH COMM] Emergency Mid-Show**
 > 
@@ -67,8 +67,8 @@ The interface is built for the dark. Everything critical is accessible via tacti
 * **Dual-Mode Inspector**: The bottom-right Inspector features two tabs. The default **Cue Editor** mode allows you to build the show. Clicking the **Live Media** tab switches the interface to view currently playing cues. Here, operators can scrub playheads, adjust live volume, or hit "Kill" on a specific layer without permanently saving those changes to the show file.
 * **Resizable Panels**: Draggable dividers between Cue List, Stage Preview, and Inspector let operators allocate screen space freely (e.g., expanding the Stage Preview for detailed mapping).
 * **Global Master Volume**: Scaled globally in the bottom status bar to uniformly limit output independent of individual cue volume values.
-* **Batch Editing (New in 1.5.0)**: Selecting multiple cues with conflicting values renders a `<Multiple Values>` placeholder styled in italicized, amber font with an `AlertTriangle` warning icon. Click inside the field to clear and instantly overwrite all values.
-* **Live JSON Validation (New in 1.5.0)**: Input fields for Webhook headers and bodies validate syntax in real-time. Invalid JSON displays a red border outline and blocks state-saves, protecting the system from corrupt data writes.
+* **Batch Editing (New in 1.5.1)**: Selecting multiple cues with conflicting values renders a `<Multiple Values>` placeholder styled in italicized, amber font with an `AlertTriangle` warning icon. Click inside the field to clear and instantly overwrite all values.
+* **Live JSON Validation (New in 1.5.1)**: Input fields for Webhook headers and bodies validate syntax in real-time. Invalid JSON displays a red border outline and blocks state-saves, protecting the system from corrupt data writes.
 
 ---
 
@@ -86,8 +86,8 @@ Using the **Output Routing** dropdown in the Inspector, operators can dictate ex
 * **Distributed Network**: Route cues to specific display targets (e.g., `Display 1` for Stage Left, `Display 2` for Stage Right, or `webrtc` for virtual stream targets). Cues set to `all` will render to all screens.
 When projector screens are opened (by clicking **Open Projector Screens** or via settings), TuxShow spawns borderless, full-screen, cursor-free windows mapped directly to each physical output display. A perspective warp grid can be drag-adjusted on each display to map the projection target onto the stage scenery.
 
-### 3.3 Multi-Projector Stage Preview Tabs (New in 1.5.0)
-To monitor what is rendering on different channels from the control console, TuxShow v1.5.0 introduces preview isolation tabs at the top of the **Stage Preview**:
+### 3.3 Multi-Projector Stage Preview Tabs (New in 1.5.1)
+To monitor what is rendering on different channels from the control console, TuxShow v1.5.1 introduces preview isolation tabs at the top of the **Stage Preview**:
 * **Composite (All)**: An overlay-composite rendering showing all active visual layers across all outputs merged together.
 * **Individual Displays (e.g., Display 1, Display 2)**: Dynamically isolates and previews only the visual cues and warping transformations routed to that specific physical display window.
 * **WebRTC (Virtual)**: Previews the virtual WebRTC stream output broadcast to backend signaling servers.
@@ -241,7 +241,7 @@ When an active visual cue (Video, Image, or Live Camera) is selected, the **Effe
   - *Technical Definition*: Branches show execution based on Boolean logic gates. Can evaluate immediate states or run continuously in a 100ms polling worker loop.
   - *Trigger Behavior*: Evaluates if a specified cue is playing/stopped/completed, or if an incoming network OSC path matches a target value. Triggers a `True Target Cue` if correct, or a `False Target Cue` if incorrect.
   - *Real-World Use Case*: Checking if the pre-show music cue is finished; if so, firing the house light dimmers, otherwise waiting.
-* **Sequence (New in 1.5.0)**:
+* **Sequence (New in 1.5.1)**:
   - *Technical Definition*: A nested timeline container. Child cues evaluate and fire based strictly on their programmed `startTime` seconds, ignoring standard Auto-Follow logic. Can be imported/exported as portable `.TSSnip` JSON templates.
   - *Trigger Behavior*: Acts as a rigid timeline block. Pausing the sequence pauses all children.
   - *Real-World Use Case*: Building a highly choreographed 30-second opening video montage that needs to be portable between different show files.
@@ -269,15 +269,15 @@ When an active visual cue (Video, Image, or Live Camera) is selected, the **Effe
   - *Technical Definition*: Engages the built-in "Vision Mixer" WebGL shader suite.
   - *Trigger Behavior*: Overrides standard alpha fades, applying dynamic wipes (Iris, Star, Curtain, Ripple, Wind) between the outgoing and incoming visual layers.
   - *Real-World Use Case*: Executing a classic "Star Wipe" to transition between two game show graphics.
-* **Surtitle (New in 1.5.0)**:
+* **Surtitle (New in 1.5.1)**:
   - *Technical Definition*: Renders sequential lines of subtitles or captions step-by-step. Features a `150ms` execution lock to prevent double-skips if manual clicks and auto-advance timers collide.
   - *Trigger Behavior*: Advancing transitions lines. Stopping resets playhead index to `-1`.
   - *Real-World Use Case*: Subtitling a foreign-language opera where timing must align with live singing.
-* **IoT Webhook (New in 1.5.0)**:
+* **IoT Webhook (New in 1.5.1)**:
   - *Technical Definition*: Sends HTTP/HTTPS commands to network targets. Bypasses CORS via native backend bridge execution.
   - *Trigger Behavior*: Returns delivery failures as visual error toasts to the operator console.
   - *Real-World Use Case*: Triggering smart relays to turn on practical stage lamps during a video cue.
-* **Memo (New in 1.5.0)**:
+* **Memo (New in 1.5.1)**:
   - *Technical Definition*: visual console notes.
   - *Trigger Behavior*: Displays visual instructions inline.
   - *Real-World Use Case*: Displays "DANGER: ACTOR ON TRAPDOOR" text box for safety.
@@ -298,7 +298,7 @@ When an active visual cue (Video, Image, or Live Camera) is selected, the **Effe
 
 ## Appendix A: "The Wizard of Oz" Production Walkthrough
 
-To demonstrate TuxShow v1.5.0's capabilities, here is how a community theater tech director programs a complex 7-scene projection layout for *The Wizard of Oz*.
+To demonstrate TuxShow v1.5.1's capabilities, here is how a community theater tech director programs a complex 7-scene projection layout for *The Wizard of Oz*.
 
 ### 1. Scene 1 (The Kansas Farm)
 The show opens with a static video loop of a farmhouse. To achieve the classic look, the operator adds a Color Correction effect to the cue, applying a live HSB Filter to instantly drop the visual saturation to 0%, locking in a stark sepia tone.
