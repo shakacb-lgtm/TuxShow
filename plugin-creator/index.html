@@ -43,6 +43,15 @@
         <h2 class="section-title"><i data-lucide="sliders"></i> Plugin Configuration</h2>
         
         <form id="config-form" class="space-y-4" onsubmit="return false;">
+          <!-- Generation Engine Selector -->
+          <div class="form-group">
+            <label for="generator-mode">Generation Engine</label>
+            <select id="generator-mode">
+              <option value="local" selected>Local Boilerplate (Free & Offline)</option>
+              <option value="ai">Gemini AI Assistant (Requires Free Key)</option>
+            </select>
+          </div>
+
           <!-- Metadata Fields -->
           <div class="grid grid-2">
             <div class="form-group">
@@ -126,9 +135,9 @@
           </div>
 
           <!-- AI Prompt -->
-          <div class="form-group">
+          <div class="form-group hidden" id="ai-prompt-group">
             <label for="ai-prompt">Assistant Design Prompt</label>
-            <textarea id="ai-prompt" placeholder="Explain what the plugin should do in plain English. For example:&#10;'Listen on OSC path /tuxshow/intensity. When a float value is received, smoothly fade DMX channel 1 to that value over 2 seconds.'" required></textarea>
+            <textarea id="ai-prompt" placeholder="Explain what the plugin should do in plain English. For example:&#10;'Listen on OSC path /tuxshow/intensity. When a float value is received, smoothly fade DMX channel 1 to that value over 2 seconds.'"></textarea>
           </div>
 
           <!-- Action Button -->
@@ -183,7 +192,7 @@
         <button id="close-modal-btn" class="btn btn-icon"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body space-y-4">
-        <p class="field-desc">Provide your Gemini API key to query the LLM model locally and securely.</p>
+        <p class="field-desc">Provide your Gemini API key to query the LLM model locally and securely. <strong>Gemini API is free to use</strong> (15 RPM / 1500 RPD). Get a free key at <a href="https://aistudio.google.com" target="_blank" style="color: #6366f1; text-decoration: underline;">Google AI Studio</a>.</p>
         <div class="form-group">
           <label for="api-key-input">Gemini API Key</label>
           <input type="password" id="api-key-input" placeholder="AIzaSy...">

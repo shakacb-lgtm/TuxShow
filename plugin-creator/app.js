@@ -26,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const apiStatusBadge = document.getElementById('api-status-badge');
 
   const configForm = document.getElementById('config-form');
+  const generatorModeSelect = document.getElementById('generator-mode');
+  const aiPromptGroup = document.getElementById('ai-prompt-group');
   const pluginIdInput = document.getElementById('plugin-id');
   const pluginNameInput = document.getElementById('plugin-name');
   const pluginVersionInput = document.getElementById('plugin-version');
@@ -70,6 +72,18 @@ document.addEventListener('DOMContentLoaded', () => {
     updateCodeTabLabel();
   });
 
+  generatorModeSelect.addEventListener('change', () => {
+    const isAi = generatorModeSelect.value === 'ai';
+    if (isAi) {
+      aiPromptGroup.classList.remove('hidden');
+      aiPromptTextarea.required = true;
+    } else {
+      aiPromptGroup.classList.add('hidden');
+      aiPromptTextarea.required = false;
+    }
+    updateApiStatus();
+  });
+
   // Editor Tabs Switching
   editorTabs.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-btn')) {
@@ -100,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     if (isGenerating) return;
     
-    if (!apiKey) {
+    if (generatorModeSelect.value === 'ai' && !apiKey) {
       alert("Please configure your Gemini API Key in the settings panel first.");
       settingsModal.classList.remove('hidden');
       return;
@@ -122,7 +136,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Helper Functions ---
 
   function updateApiStatus() {
-    if (apiKey) {
+    if (generatorModeSelect && generatorModeSelect.value === 'local') {
+      apiStatusBadge.className = 'status-badge status-local';
+      apiStatusBadge.querySelector('.status-label').textContent = 'Offline Local Mode';
+    } else if (apiKey) {
       apiStatusBadge.className = 'status-badge status-configured';
       apiStatusBadge.querySelector('.status-label').textContent = 'API Connected';
     } else {
@@ -190,6 +207,74 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const codeFilename = getTargetCodeFilename();
+
+    // Check if we are running in Local Boilerplate mode
+    if (generatorModeSelect.value === 'local') {
+      auditResults.innerHTML = `
+        <div class="log-item log-warn">
+          <i data-lucide="loader"></i>
+          <span>Generating offline boilerplate templates...</span>
+        </div>
+      `;
+      lucide.createIcons();
+
+      try {
+        // Generate manifest.json object locally
+        const manifestObj = {
+          id: pluginId,
+          name: pluginName,
+          version: pluginVersion,
+          description: pluginDesc,
+          permissions: selectedPermissions
+        };
+
+        if (pluginType === 'node-backend') {
+          manifestObj.entry = "index.js";
+        } else if (pluginType === 'python-backend') {
+          manifestObj.entry = "main.py";
+        } else if (pluginType === 'ui-tab') {
+          manifestObj.entryPoints = { ui: "ui.js" };
+        }
+
+        // Generate Boilerplate Code locally
+        let codeContent = "";
+        if (pluginType === 'node-backend') {
+          codeContent = generateNodeBoilerplate(pluginId, pluginName, pluginVersion, pluginDesc, selectedPermissions);
+        } else if (pluginType === 'python-backend') {
+          codeContent = generatePythonBoilerplate(pluginId, pluginName, pluginVersion, pluginDesc, selectedPermissions);
+        } else if (pluginType === 'ui-tab') {
+          codeContent = generateUiBoilerplate(pluginId, pluginName, pluginVersion, pluginDesc, selectedPermissions);
+        }
+
+        // Simulate a small delay for UX satisfaction
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        generatedFiles["manifest.json"] = JSON.stringify(manifestObj, null, 2);
+        generatedFiles["code"] = codeContent;
+
+        // Sync active tab to text area
+        codeEditor.value = generatedFiles[currentActiveTab];
+        
+        // Run the Gatekeeper Audit
+        runSecurityAudit(true);
+
+      } catch (err) {
+        console.error('[Plugin Generator] Local generation failed:', err);
+        auditResults.innerHTML = `
+          <div class="log-item log-fail">
+            <i data-lucide="alert-triangle"></i>
+            <span>Local Generation Failed: ${err.message}</span>
+          </div>
+        `;
+        lucide.createIcons();
+      } finally {
+        isGenerating = false;
+        generateBtn.disabled = false;
+        generateSpinner.classList.add('hidden');
+        generateBtnText.textContent = 'Generate Plugin Code';
+      }
+      return;
+    }
 
     // Construct the LLM Request System and User instructions
     const systemInstruction = `You are a core developer for TuxShow FOSS, a theatrical show control and projection mapping system.
@@ -598,5 +683,243 @@ ${prompt}`;
     } catch (e) {
       alert(`Failed to construct ZIP package: ${e.message}`);
     }
+  }
+
+  function generateNodeBoilerplate(pluginId, pluginName, pluginVersion, pluginDesc, permissions) {
+    let permBoilerplate = "";
+    if (permissions.length === 0) {
+      permBoilerplate = `    // No permissions requested. Access core state and custom console triggers here.`;
+    } else {
+      permissions.forEach(perm => {
+        if (perm === 'osc:listen') {
+          permBoilerplate += `    // Listen for incoming OSC packets
+    core.on('osc:message', (packet) => {
+      console.log(\`[\${pluginId}] OSC incoming: \${packet.address} ->\`, packet.args);
+      // Example: if (packet.address === '/tuxshow/intensity') { ... }
+    });\n\n`;
+        } else if (perm === 'osc:send') {
+          permBoilerplate += `    // Example: Dispatch outgoing OSC message
+    // core.dispatch('osc:send', { address: '/tuxshow/status', args: ['initialized'] });\n\n`;
+        } else if (perm === 'dmx:control') {
+          permBoilerplate += `    // Direct control of Art-Net DMX levels
+    // Example: Set universe 0, channel 1 to value 255
+    // core.dispatch('dmx:update', { universe: 0, channel: 1, value: 255 });\n\n`;
+        } else if (perm === 'pjlink:control') {
+          permBoilerplate += `    // Projector power and shutter control (PJLink)
+    // Example: Turn on projector at host IP
+    // core.dispatch('pjlink:cmd', { host: '192.168.1.100', cmd: 'POWR', value: '1' });\n\n`;
+        } else if (perm === 'cue:fire') {
+          permBoilerplate += `    // Programmatically trigger cues in TuxShow
+    // Example: Trigger cue index 5
+    // core.cue.fire(5);\n\n`;
+        } else if (perm === 'layer:modify') {
+          permBoilerplate += `    // Modify video layers, shaders, and composition opacity
+    // Example: Set primary layer opacity to 50%
+    // core.layer.modify({ id: 'primary-layer', opacity: 0.5 });\n\n`;
+        }
+      });
+    }
+
+    return `/**
+ * TuxShow Node.js Backend Plugin: ${pluginName}
+ * ID: ${pluginId}
+ * Version: ${pluginVersion}
+ * Description: ${pluginDesc}
+ * Generated via TuxShow Plugin Creator (Local Template Mode)
+ */
+
+async function init(core) {
+  try {
+    console.log("[\${pluginId}] Initializing Node.js plugin...");
+
+${permBoilerplate}  } catch (err) {
+    console.error("[\${pluginId}] Error during initialization:", err);
+  }
+}
+
+async function shutdown(core) {
+  try {
+    console.log("[\${pluginId}] Shutting down Node.js plugin...");
+    // Teardown connections, event bindings, or network listeners here
+  } catch (err) {
+    console.error("[\${pluginId}] Error during shutdown:", err);
+  }
+}
+
+module.exports = { init, shutdown };
+`;
+  }
+
+  function generatePythonBoilerplate(pluginId, pluginName, pluginVersion, pluginDesc, permissions) {
+    let permBoilerplate = "";
+    if (permissions.length === 0) {
+      permBoilerplate = `            # No permissions requested. Parse core payloads here.
+            pass`;
+    } else {
+      permissions.forEach(perm => {
+        if (perm === 'osc:listen') {
+          permBoilerplate += `            if event == "osc:message":
+                log(f"Received OSC message: {payload.get('address')} -> {payload.get('args')}")\n\n`;
+        } else if (perm === 'osc:send') {
+          permBoilerplate += `            # Example: Send outgoing OSC message
+            # dispatch("osc:send", {"address": "/status", "args": ["online"]})\n\n`;
+        } else if (perm === 'dmx:control') {
+          permBoilerplate += `            # Direct control of Art-Net DMX levels
+            # Example: Set universe 0, channel 1 to value 255
+            # dispatch("dmx:update", {"universe": 0, "channel": 1, "value": 255})\n\n`;
+        } else if (perm === 'pjlink:control') {
+          permBoilerplate += `            # Projector power and shutter control (PJLink)
+            # Example: Turn on projector
+            # dispatch("pjlink:cmd", {"host": "192.168.1.100", "cmd": "POWR", "value": "1"})\n\n`;
+        } else if (perm === 'cue:fire') {
+          permBoilerplate += `            # Programmatically trigger cues
+            # Example: Fire cue index 3
+            # dispatch("cue:fire", {"index": 3})\n\n`;
+        } else if (perm === 'layer:modify') {
+          permBoilerplate += `            # Modify video layers, shaders, and composition opacity
+            # Example: Set layer opacity to 0.75
+            # dispatch("layer:modify", {"id": "layer-1", "opacity": 0.75})\n\n`;
+        }
+      });
+    }
+
+    return `# -*- coding: utf-8 -*-
+"""
+TuxShow Python Backend Plugin: ${pluginName}
+ID: ${pluginId}
+Version: ${pluginVersion}
+Description: ${pluginDesc}
+Generated via TuxShow Plugin Creator (Local Template Mode)
+"""
+import sys
+import json
+
+def log(msg):
+    # Log back to the TuxShow console via stdout
+    print(f"[\${pluginId}] {msg}", flush=True)
+
+def dispatch(event, payload):
+    # Communicate back to the main app via JSON messages
+    print(json.dumps({"event": event, "payload": payload}), flush=True)
+
+def main():
+    log("Initializing Python plugin (v\${pluginVersion})...")
+    
+    # Read standard input for events dispatched from the core app
+    for line in sys.stdin:
+        try:
+            data = json.loads(line.strip())
+            event = data.get("event")
+            payload = data.get("payload")
+            
+${permBoilerplate}        except Exception as e:
+            print(f"[\${pluginId}] Error parsing core message: {e}", file=sys.stderr, flush=True)
+
+if __name__ == "__main__":
+    main()
+`;
+  }
+
+  function generateUiBoilerplate(pluginId, pluginName, pluginVersion, pluginDesc, permissions) {
+    let actionButtons = "";
+    permissions.forEach(perm => {
+      if (perm === 'osc:send') {
+        actionButtons += `        h('button', {
+          className: 'px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold text-white transition-colors',
+          onClick: () => {
+            // Example: Dispatch outgoing OSC packet through pre-load IPC
+            if (window.tuxShowIPC) {
+              window.tuxShowIPC.send('osc:send', { address: '/tuxshow/test', args: [1.0] });
+            }
+          }
+        }, 'Send Test OSC'),\n`;
+      } else if (perm === 'dmx:control') {
+        actionButtons += `        h('button', {
+          className: 'px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-xs font-bold text-white transition-colors',
+          onClick: () => {
+            // Example: Set channel 1 to full intensity
+            if (window.tuxShowIPC) {
+              window.tuxShowIPC.send('dmx:update', { universe: 0, channel: 1, value: 255 });
+            }
+          }
+        }, 'Flash DMX Ch 1'),\n`;
+      } else if (perm === 'cue:fire') {
+        actionButtons += `        h('button', {
+          className: 'px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-xs font-bold text-white transition-colors',
+          onClick: () => {
+            // Example: Fire first cue
+            if (window.tuxShowIPC) {
+              window.tuxShowIPC.send('cue:fire', { index: 1 });
+            }
+          }
+        }, 'Trigger Cue 1'),\n`;
+      } else if (perm === 'layer:modify') {
+        actionButtons += `        h('button', {
+          className: 'px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded text-xs font-bold text-white transition-colors',
+          onClick: () => {
+            // Example: Modify compositor layer opacity
+            if (window.tuxShowIPC) {
+              window.tuxShowIPC.send('layer:modify', { id: 'primary-layer', opacity: 0.1 });
+            }
+          }
+        }, 'Dim Layers'),\n`;
+      }
+    });
+
+    if (actionButtons === "") {
+      actionButtons = `        h('p', { className: 'text-[11px] text-gray-400 italic' }, 'No hardware control permissions requested. Use standard React states to layout your UI inputs.')`;
+    }
+
+    return `/**
+ * TuxShow UI Tab Plugin: ${pluginName}
+ * ID: ${pluginId}
+ * Version: ${pluginVersion}
+ * Description: ${pluginDesc}
+ * Generated via TuxShow Plugin Creator (Local Template Mode)
+ */
+
+if (window.tuxShowRegistry && window.tuxShowRegistry.registerInspectorTab) {
+  const React = window.React;
+  const h = React.createElement;
+
+  // Render Component inside TuxShow Inspector Panel
+  const PluginUiComponent = ({ activeCue, cues, setCues }) => {
+    const [counter, setCounter] = React.useState(0);
+
+    return h('div', { className: 'space-y-4 p-4 bg-gray-950/20 border border-gray-900/60 rounded-xl' },
+      h('div', {},
+        h('h3', { className: 'text-sm font-bold text-gray-200' }, '\${pluginName}'),
+        h('p', { className: 'text-[11px] text-gray-400 mt-1' }, '\${pluginDesc}')
+      ),
+      
+      h('div', { className: 'flex items-center gap-4 border-y border-gray-900/50 py-3' },
+        h('span', { className: 'text-xs text-gray-300' }, \\\`Counter: \\\${counter}\\\`),
+        h('button', {
+          className: 'px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs rounded transition-colors',
+          onClick: () => setCounter(prev => prev + 1)
+        }, 'Increment')
+      ),
+
+      h('div', { className: 'space-y-2' },
+        h('h4', { className: 'text-[11px] font-semibold text-gray-400 uppercase tracking-wider' }, 'Action Triggers'),
+        h('div', { className: 'flex flex-wrap gap-2' },
+\${actionButtons}        )
+      )
+    );
+  };
+
+  // Register in TuxShow accordion panel list
+  window.tuxShowRegistry.registerInspectorTab({
+    id: '\${pluginId}',
+    name: '\${pluginName}',
+    icon: h('svg', { className: 'w-3.5 h-3.5 text-indigo-400', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
+      h('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4' })
+    ),
+    renderTab: PluginUiComponent
+  });
+
+  console.log('[\${pluginName}] Registered successfully');
+}
+`;
   }
 });
