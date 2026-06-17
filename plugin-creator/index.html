@@ -49,7 +49,13 @@
             <select id="generator-mode">
               <option value="local" selected>Local Boilerplate (Free & Offline)</option>
               <option value="ai">Gemini AI Assistant (Requires Free Key)</option>
+              <option value="external">External AI Prompt (ChatGPT / Claude / etc.)</option>
             </select>
+          </div>
+          <div class="form-group" style="margin-top: 4px;">
+            <p class="field-desc" style="margin-bottom: 0;">
+              Want to use ChatGPT or Claude? <a href="#" id="ai-prompt-link" style="color: var(--primary); text-decoration: underline; font-weight: 500; cursor: pointer;">Get prompt for your personal AI</a>.
+            </p>
           </div>
 
           <!-- Metadata Fields -->
@@ -140,11 +146,16 @@
             <textarea id="ai-prompt" placeholder="Explain what the plugin should do in plain English. For example:&#10;'Listen on OSC path /tuxshow/intensity. When a float value is received, smoothly fade DMX channel 1 to that value over 2 seconds.'"></textarea>
           </div>
 
-          <!-- Action Button -->
-          <button id="generate-btn" class="btn btn-primary w-full">
-            <span class="btn-text">Generate Plugin Code</span>
-            <span class="spinner hidden"></span>
-          </button>
+          <!-- Action Buttons -->
+          <div style="display: flex; gap: 10px; width: 100%;">
+            <button id="generate-btn" class="btn btn-primary" style="flex-grow: 1;">
+              <span class="btn-text">Generate Code</span>
+              <span class="spinner hidden"></span>
+            </button>
+            <button id="copy-prompt-btn" class="btn btn-icon" title="Copy Prompt for External AI" type="button" style="padding: 10px 14px;">
+              <i data-lucide="copy"></i>
+            </button>
+          </div>
         </form>
       </section>
 
@@ -207,6 +218,26 @@
           </select>
         </div>
         <button id="save-settings-btn" class="btn btn-primary w-full">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt Copied Modal -->
+  <div id="prompt-modal" class="modal-overlay hidden">
+    <div class="modal card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3><i data-lucide="bot"></i> External AI Prompt</h3>
+        <button id="close-prompt-modal-btn" class="btn btn-icon" type="button"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body space-y-4">
+        <p class="field-desc">This prompt contains the complete TuxShow FOSS API specifications and your requested permissions. Copy it, paste it into ChatGPT, Claude, or any LLM, and paste the JSON output back here in the editor tabs to check security and download the ZIP package!</p>
+        <div class="form-group">
+          <textarea id="prompt-textarea" style="height: 250px; font-family: monospace; font-size: 11px;" readonly></textarea>
+        </div>
+        <div class="flex gap-2" style="display: flex; gap: 10px;">
+          <button id="copy-modal-prompt-btn" class="btn btn-primary" style="flex-grow: 1;">Copy to Clipboard</button>
+          <button id="close-prompt-modal-btn2" class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white;">Close</button>
+        </div>
       </div>
     </div>
   </div>

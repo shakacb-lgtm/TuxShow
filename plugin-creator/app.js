@@ -44,6 +44,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const downloadBtn = document.getElementById('download-btn');
   const auditResults = document.getElementById('audit-results');
 
+  const copyPromptBtn = document.getElementById('copy-prompt-btn');
+  const aiPromptLink = document.getElementById('ai-prompt-link');
+  const promptModal = document.getElementById('prompt-modal');
+  const closePromptModalBtn = document.getElementById('close-prompt-modal-btn');
+  const closePromptModalBtn2 = document.getElementById('close-prompt-modal-btn2');
+  const promptTextarea = document.getElementById('prompt-textarea');
+  const copyModalPromptBtn = document.getElementById('copy-modal-prompt-btn');
+
   // --- Setup Initial UI State ---
   updateApiStatus();
   apiKeyInput.value = apiKey;
@@ -68,19 +76,161 @@ document.addEventListener('DOMContentLoaded', () => {
     settingsModal.classList.add('hidden');
   });
 
+  // --- Copy/Generate Prompt for External AI ---
+  function showExternalPromptModal() {
+    // Validate config form
+    if (!configForm.checkValidity()) {
+      configForm.reportValidity();
+      return;
+    }
+
+    const pluginId = pluginIdInput.value.trim();
+    const pluginName = pluginNameInput.value.trim();
+    const pluginVersion = pluginVersionInput.value.trim();
+    const pluginType = pluginTypeSelect.value;
+    const pluginDesc = pluginDescInput.value.trim();
+    const prompt = aiPromptTextarea.value.trim();
+
+    const selectedPermissions = [];
+    document.querySelectorAll('input[name="permissions"]:checked').forEach(cb => {
+      selectedPermissions.push(cb.value);
+    });
+
+    const codeFilename = getTargetCodeFilename();
+
+    // Compile the instruction prompt
+    const compiledPrompt = `You are a helper AI designing a custom plugin for TuxShow FOSS, a theatrical show control and projection mapping system.
+
+Please generate a plugin for TuxShow matching the details below.
+Your response MUST be a single, raw JSON object matching this schema EXACTLY:
+{
+  "manifest": {
+    "id": "${pluginId}",
+    "name": "${pluginName}",
+    "version": "${pluginVersion}",
+    "description": "${pluginDesc}",
+    ${pluginType === 'node-backend' ? '"entry": "index.js",\n' : ''}${pluginType === 'python-backend' ? '"entry": "main.py",\n' : ''}${pluginType === 'ui-tab' ? '"entryPoints": { "ui": "ui.js" },\n' : ''}"permissions": [${selectedPermissions.map(p => `"${p}"`).join(', ')}]
+  },
+  "code": "YOUR_GENERATED_CODE_HERE_AS_A_SINGLE_ESCAPED_STRING"
+}
+
+### Guidelines:
+1. Manifest requirements:
+   - "permissions" array must contain ONLY these strings (do not add others): [${selectedPermissions.map(p => `"${p}"`).join(', ')}].
+2. Code file ("${codeFilename}") requirements:
+   - If UI Tab ("ui.js"):
+     - Must register the custom inspector tab with the global registry:
+       \`window.tuxShowRegistry.registerInspectorTab({ id, name, icon, renderTab })\`
+       where \`renderTab\` is a React component that displays custom widgets and settings. Make sure it uses React's API securely.
+   - If Headless Backend ("index.js" or "main.py"):
+     - MUST BE HEADLESS: References to browser DOM models like 'document', 'window', 'document.getElementById', or 'querySelector' are strictly prohibited.
+     - FAIL-SAFE INTEGRITY: Wrap major lifecycle hooks (like initialization and teardown) in try/catch blocks.
+     - NON-BLOCKING: Use async/await standard structures.
+     - PUB/SUB INTERACTION: Interface with the host app using:
+       - \`core.on(event_name, callback)\` to listen to events.
+       - \`core.dispatch(event_name, payload)\` to emit changes.
+       - \`core.cue.fire(index)\` to trigger cues.
+       - \`core.layer.modify({ id, opacity, ... })\` to modify projection/compositor properties.
+
+### User Plugin Requirements:
+Plugin Name: ${pluginName}
+Plugin ID: ${pluginId}
+Version: ${pluginVersion}
+Description: ${pluginDesc}
+Runtime Type: ${pluginType}
+Allowed Permissions: [${selectedPermissions.join(', ')}]
+
+Prompt instruction:
+${prompt ? prompt : 'Generate a clean, working boilerplate for this plugin.'}
+
+Return ONLY raw JSON matching the schema. Do not enclose the JSON inside markdown code blocks (e.g. do not use \`\`\`json).`;
+
+    // Populate textarea and show modal
+    promptTextarea.value = compiledPrompt;
+    promptModal.classList.remove('hidden');
+    
+    // Auto-select text in textarea
+    promptTextarea.select();
+  }
+
+  copyPromptBtn.addEventListener('click', showExternalPromptModal);
+
+  if (aiPromptLink) {
+    aiPromptLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showExternalPromptModal();
+    });
+  }
+
+  const closePromptModal = () => {
+    promptModal.classList.add('hidden');
+  };
+  closePromptModalBtn.addEventListener('click', closePromptModal);
+  closePromptModalBtn2.addEventListener('click', closePromptModal);
+
+  copyModalPromptBtn.addEventListener('click', () => {
+    promptTextarea.select();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(promptTextarea.value).then(() => {
+          showCopySuccess();
+        }).catch(err => {
+          fallbackCopyToClipboard();
+        });
+      } else {
+        fallbackCopyToClipboard();
+      }
+    } catch (err) {
+      fallbackCopyToClipboard();
+    }
+  });
+
+  function showCopySuccess() {
+    copyModalPromptBtn.textContent = 'Copied!';
+    copyModalPromptBtn.style.backgroundColor = 'var(--success)';
+    setTimeout(() => {
+      copyModalPromptBtn.textContent = 'Copy to Clipboard';
+      copyModalPromptBtn.style.backgroundColor = 'var(--primary)';
+    }, 1500);
+  }
+
+  function fallbackCopyToClipboard() {
+    try {
+      promptTextarea.select();
+      const successful = document.execCommand('copy');
+      if (successful) {
+        showCopySuccess();
+      } else {
+        throw new Error('execCommand returned false');
+      }
+    } catch (err) {
+      alert('Failed to copy to clipboard automatically. Please select the text and copy manually (Ctrl+C).');
+    }
+  }
+
   pluginTypeSelect.addEventListener('change', () => {
     updateCodeTabLabel();
   });
 
   generatorModeSelect.addEventListener('change', () => {
-    const isAi = generatorModeSelect.value === 'ai';
-    if (isAi) {
+    const mode = generatorModeSelect.value;
+    const isAi = mode === 'ai';
+    const isExternal = mode === 'external';
+
+    if (isAi || isExternal) {
       aiPromptGroup.classList.remove('hidden');
-      aiPromptTextarea.required = true;
+      aiPromptTextarea.required = isAi;
     } else {
       aiPromptGroup.classList.add('hidden');
       aiPromptTextarea.required = false;
     }
+
+    if (isExternal) {
+      generateBtnText.textContent = 'Get AI Prompt';
+    } else {
+      generateBtnText.textContent = 'Generate Code';
+    }
+
     updateApiStatus();
   });
 
@@ -113,6 +263,11 @@ document.addEventListener('DOMContentLoaded', () => {
   generateBtn.addEventListener('click', async (e) => {
     e.preventDefault();
     if (isGenerating) return;
+
+    if (generatorModeSelect.value === 'external') {
+      showExternalPromptModal();
+      return;
+    }
     
     if (generatorModeSelect.value === 'ai' && !apiKey) {
       alert("Please configure your Gemini API Key in the settings panel first.");
@@ -135,10 +290,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Helper Functions ---
 
+  function getGenerateBtnText() {
+    return generatorModeSelect.value === 'external' ? 'Get AI Prompt' : 'Generate Plugin Code';
+  }
+
   function updateApiStatus() {
     if (generatorModeSelect && generatorModeSelect.value === 'local') {
       apiStatusBadge.className = 'status-badge status-local';
       apiStatusBadge.querySelector('.status-label').textContent = 'Offline Local Mode';
+    } else if (generatorModeSelect && generatorModeSelect.value === 'external') {
+      apiStatusBadge.className = 'status-badge status-local';
+      apiStatusBadge.querySelector('.status-label').textContent = 'External AI Mode';
     } else if (apiKey) {
       apiStatusBadge.className = 'status-badge status-configured';
       apiStatusBadge.querySelector('.status-label').textContent = 'API Connected';
@@ -271,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isGenerating = false;
         generateBtn.disabled = false;
         generateSpinner.classList.add('hidden');
-        generateBtnText.textContent = 'Generate Plugin Code';
+        generateBtnText.textContent = getGenerateBtnText();
       }
       return;
     }
@@ -449,7 +611,7 @@ ${prompt}`;
         isGenerating = false;
         generateBtn.disabled = false;
         generateSpinner.classList.add('hidden');
-        generateBtnText.textContent = 'Generate Plugin Code';
+        generateBtnText.textContent = getGenerateBtnText();
       }
     }
   }
