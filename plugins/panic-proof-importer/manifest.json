@@ -1,0 +1,10 @@
+{
+  "id": "panic-proof-importer",
+  "name": "\"Panic-Proof\" Slide Importer",
+  "version": "1.0.0",
+  "description": "Utility plugin to instantly parse PDF/PPTX presentation slides and import them as sequential image cues with text content names and descriptions.",
+  "entryPoints": {
+    "ui": "ui.js"
+  },
+  "permissions": []
+}

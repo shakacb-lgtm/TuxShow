@@ -1,0 +1,12 @@
+{
+  "id": "dev.tuxshow.dummy-diagnostics",
+  "name": "Dummy Diagnostics",
+  "version": "1.0.0",
+  "author": "TuxShow Core Team",
+  "description": "A test plugin to verify UI injection and IPC logging.",
+  "permissions": ["logs", "ui_injection"],
+  "entryPoints": {
+    "ui": "ui.js",
+    "backend": null 
+  }
+}
