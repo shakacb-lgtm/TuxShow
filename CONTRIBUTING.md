@@ -33,11 +33,27 @@ TuxShow is built using Electron, React, and Vite, optimized for Ubuntu Linux.
 4. Open a Pull Request against the `main` branch of the official TuxShow repository.
 
 #### Release & Version Bump Procedure
-When preparing a new release, ensure the version number is bumped in all of the following locations before building:
-1. `package.json` (Source of truth for the release script)
-2. `CHANGELOG.md` (Add the new version section and date)
-3. `src/App.jsx` (Update the Header subtitle and the About Modal)
-4. Run `python3 release_manager.py` to draft and upload the GitHub release.
+When preparing a new release, follow these steps in order to guarantee the version is updated across the codebase and the GitHub Release notes are correctly populated:
+
+1. **Version Code Updates**: Update the version number in:
+   - `package.json`
+   - `package-lock.json` (Run `npm install --package-lock-only --legacy-peer-deps` to synchronize)
+   - `src/App.jsx` (Update the header subtitle and About modal version strings)
+   - `compile_manual.js` (Update the default version fallback)
+2. **Manual Renaming & Compilation**:
+   - Rename `docs/TuxShow_v<OLD_VERSION>_Manual.md` to `docs/TuxShow_v<NEW_VERSION>_Manual.md` and update internal references.
+   - Delete the old `.pdf` manual, and run `npx electron compile_manual.js --no-sandbox` to generate the new `docs/TuxShow v<NEW_VERSION>.pdf`.
+3. **Changelog and README**:
+   - Add a new release section with details and dates in `CHANGELOG.md`.
+   - Update the version string under capabilities in `README.md`.
+4. **Git Commit & Tag**:
+   - Stage and commit all changes: `git commit -m "release: Bump version to <NEW_VERSION>"`.
+   - Create and push the version tag: `git tag v<NEW_VERSION> && git push origin v<NEW_VERSION>`.
+5. **Publish / Update Release Notes**:
+   - Pushing the tag triggers the automated GitHub Actions release builder.
+   - Once the action bot creates the release, synchronize the release notes on GitHub with the changelog details using the GitHub CLI:
+     `gh release edit v<NEW_VERSION> --notes-file path/to/notes.txt`
+     *(Or directly input notes: `gh release edit v<NEW_VERSION> --notes "notes content"`)*
 
 ## 🤝 Code of Conduct
 By participating in this project, you agree to abide by our Code of Conduct. We are committed to providing a welcoming and inspiring environment for students, educators, and developers alike.
