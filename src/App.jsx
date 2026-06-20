@@ -744,7 +744,7 @@ const Header = React.memo(function Header({
         </button>
         <div className="flex flex-col">
           <h1 className="font-bold tracking-widest text-gray-200 leading-tight uppercase">
-            TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control <span className="text-[10px] font-mono text-blue-500 ml-1">v1.5.1</span></span>
+            TuxShow <span className="text-gray-500 font-normal tracking-normal text-sm ml-2 normal-case">Show Control <span className="text-[10px] font-mono text-blue-500 ml-1">v1.5.2</span></span>
           </h1>
           <span className="text-[9px] text-blue-400/80 font-mono tracking-widest uppercase mt-0.5">{String(gpuStatus)}</span>
         </div>
@@ -3318,7 +3318,7 @@ export default function App() {
            <span className="text-3xl font-black text-blue-500">T</span>
         </div>
         <h2 className="text-xl font-bold text-white mb-1">TuxShow</h2>
-        <p className="text-xs text-gray-500 font-mono mb-6">Version 1.5.1</p>
+        <p className="text-xs text-gray-500 font-mono mb-6">Version 1.5.2</p>
         <p className="text-sm text-gray-300 mb-6 italic">"Designed by Christopher Baker with AI assistance"</p>
         
         <div className="text-[10px] text-gray-500 border-t border-gray-800 pt-4 text-left">

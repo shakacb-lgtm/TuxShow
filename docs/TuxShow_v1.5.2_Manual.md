@@ -1,7 +1,7 @@
-# TuxShow v1.5.1: The Official Technical Manual
+# TuxShow v1.5.2: The Official Technical Manual
 ### A Complete Guide for End-Users and IT Administrators in Live Performance
 
-Welcome to TuxShow v1.5.1. If you are reading this, you are likely responsible for ensuring that a live audience experiences a flawless show. In the booth, there is no room for lag, crashed displays, or network intruders.
+Welcome to TuxShow v1.5.2. If you are reading this, you are likely responsible for ensuring that a live audience experiences a flawless show. In the booth, there is no room for lag, crashed displays, or network intruders.
 
 This manual is written with a strict philosophy: **"Student-proof the booth, protect the show."** We cover everything from low-level audio routing and IPC boundaries to practical script execution and emergency booth communications.
 
@@ -9,7 +9,7 @@ This manual is written with a strict philosophy: **"Student-proof the booth, pro
 
 ## Chapter 1: System Environments & IT Administrator Guide
 
-TuxShow v1.5.1 introduces major architectural designs to guarantee stability across vastly different hardware environments—from beefy gaming laptops to aging school-issued desktops.
+TuxShow v1.5.2 introduces major architectural designs to guarantee stability across vastly different hardware environments—from beefy gaming laptops to aging school-issued desktops.
 
 ### 1.1 Supported Architectures & Hardware Repurposing
 TuxShow is built as a Linux-first application, compiled natively for Ubuntu/Debian operating systems and their derivatives.
@@ -24,8 +24,8 @@ wsl --install
 ```
 Once Ubuntu is installed, run the standard TuxShow `.deb` package. WSLg passes the Linux WebGL acceleration directly to the native Windows GPU drivers, ensuring zero-latency projection output.
 
-### 1.3 The v1.5.1 System Profiler
-Educational theater hardware is unpredictable. TuxShow v1.5.1 features a boot-time diagnostic module that scans the host machine's GPU and RAM. It automatically locks the engine into one of three performance tiers to prevent mid-show thermal throttling:
+### 1.3 The v1.5.2 System Profiler
+Educational theater hardware is unpredictable. TuxShow v1.5.2 features a boot-time diagnostic module that scans the host machine's GPU and RAM. It automatically locks the engine into one of three performance tiers to prevent mid-show thermal throttling:
 * **High (60fps)**: Requires dedicated GPU. Unlocked multi-layered 1080p WebGL effects.
 * **Balanced (30fps)**: Standard for integrated graphics. Perfect for standard crossfades and audio-only playback.
 * **Basic (15fps)**: Engages automatically on low-RAM devices (e.g., older Raspberry Pis). Prioritizes audio sync and hard-cuts over visual transition smoothing.
@@ -321,7 +321,7 @@ When an active visual cue (Video, Image, or Live Camera) is selected, the **Effe
 
 ## Appendix A: "The Wizard of Oz" Production Walkthrough
 
-To demonstrate TuxShow v1.5.1's capabilities, here is how a community theater tech director programs a complex 7-scene projection layout for *The Wizard of Oz*.
+To demonstrate TuxShow v1.5.2's capabilities, here is how a community theater tech director programs a complex 7-scene projection layout for *The Wizard of Oz*.
 
 ### 1. Scene 1 (The Kansas Farm)
 The show opens with a static video loop of a farmhouse. To achieve the classic look, the operator adds a Color Correction effect to the cue, applying a live HSB Filter to instantly drop the visual saturation to 0%, locking in a stark sepia tone.

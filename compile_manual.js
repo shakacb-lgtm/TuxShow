@@ -19,12 +19,12 @@ app.whenReady().then(async () => {
   });
 
   // Read version from package.json
-  let version = '1.5.1';
+  let version = '1.5.2';
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
     version = pkg.version;
   } catch (e) {
-    console.warn('[PDF Compiler] Failed to read version from package.json, defaulting to 1.5.1');
+    console.warn('[PDF Compiler] Failed to read version from package.json, defaulting to 1.5.2');
   }
 
   const mdPath = path.join(__dirname, 'docs', `TuxShow_v${version}_Manual.md`);

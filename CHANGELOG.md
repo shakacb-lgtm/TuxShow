@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+[1.5.2] - 2026-06-19
+
+Added
+
+- **Stage Panic Button Keyboard Shortcut**: Bound the physical `!` operator key (typically Shift + 1) to trigger the emergency Panic routine in the main keydown listener.
+- **Developed Plugins Backup Archive**: Added backup ZIP and source folders for all developed plugins (e.g. Atmospheric Particles, Panic-Proof Slide Importer, Dummy Diagnostics) in a dedicated directory.
+- **External AI Integration**: Created a prompt generation and secure sandbox clipboard copy interface in the Plugin Creator toolkit to compile prompt guidelines for Claude, ChatGPT, and other third-party AI assistants.
+
+Fixed & Optimized
+
+- **Technical Manual Revisions**: Restructured documentation for OS architectures (defining Windows WSLg and macOS hardware repurposing), added a media format support table, detailed DMX/Art-Net settings routing steps, added Basic 15fps tier reassurance note, and compiled Appendix B for Tech Week troubleshooting.
+
 [1.5.1] - 2026-06-17
 
 Added

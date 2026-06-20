@@ -11,7 +11,7 @@ Professional show control software is often prohibitively expensive for public s
 * **Theatrical Logic:** Designed around a standard cue-list workflow familiar to Stage Managers and Designers.
 * **Isolated Rendering:** The React UI is completely firewalled from the `timelineWorker.js` execution engine. Even if the UI lags, your audio, video, and hardware triggers fire with millisecond precision.
 
-### ✨ Version 1.5.1 Capabilities
+### ✨ Version 1.5.2 Capabilities
 
 * **Multi-Machine Redundancy:** Deploy a Master and Backup laptop on the same network. The Master broadcasts UDP heartbeats at 60Hz. If the Master dies, the Backup is already perfectly slaved to the exact frame.
 * **PWA Security Gateway:** Broadcast ultra-low latency WebRTC stage monitors, mobile camera feeds, and an interactive Stage Manager Deck to crew iPads over Wi-Fi, protected by a strict PIN-auth gateway.
