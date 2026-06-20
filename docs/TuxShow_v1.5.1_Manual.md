@@ -11,25 +11,34 @@ This manual is written with a strict philosophy: **"Student-proof the booth, pro
 
 TuxShow v1.5.1 introduces major architectural designs to guarantee stability across vastly different hardware environments—from beefy gaming laptops to aging school-issued desktops.
 
-### 1.1 Deployment & The Windows WSLg Framework
+### 1.1 Supported Architectures & Hardware Repurposing
+TuxShow is built as a Linux-first application, compiled natively for Ubuntu/Debian operating systems and their derivatives.
+* **Linux**: Supported natively (recommended environment for low-latency and maximum reliability).
+* **Windows**: Supported strictly via the **WSLg (Windows Subsystem for Linux GUI)** framework, which bridges Linux graphical rendering directly into the Windows GPU drivers.
+* **macOS**: The macOS operating system itself is **not supported**. However, you do not need to throw away older Apple hardware. Older Intel-based Macs (which schools and community theatres often have sitting unused in storage) can be completely repurposed to run TuxShow natively and flawlessly by simply formatting the machine and installing Ubuntu or Debian directly onto them.
+
+### 1.2 Deployment & The Windows WSLg Framework
 While native to Linux, TuxShow runs flawlessly on Windows via the Windows Subsystem for Linux (WSL). For IT administrators deploying on Windows machines, use the standard WSLg graphical architecture. From an elevated PowerShell prompt:
 ```bash
 wsl --install
 ```
 Once Ubuntu is installed, run the standard TuxShow `.deb` package. WSLg passes the Linux WebGL acceleration directly to the native Windows GPU drivers, ensuring zero-latency projection output.
 
-### 1.2 The v1.5.1 System Profiler
+### 1.3 The v1.5.1 System Profiler
 Educational theater hardware is unpredictable. TuxShow v1.5.1 features a boot-time diagnostic module that scans the host machine's GPU and RAM. It automatically locks the engine into one of three performance tiers to prevent mid-show thermal throttling:
 * **High (60fps)**: Requires dedicated GPU. Unlocked multi-layered 1080p WebGL effects.
 * **Balanced (30fps)**: Standard for integrated graphics. Perfect for standard crossfades and audio-only playback.
 * **Basic (15fps)**: Engages automatically on low-RAM devices (e.g., older Raspberry Pis). Prioritizes audio sync and hard-cuts over visual transition smoothing.
 
-### 1.3 Secure IPC Bridge Boundary
+> [!NOTE]
+> **Low-Hardware Safety Lock**: If the System Profiler locks the host device into the **Basic (15fps)** tier, any visual choppiness or stuttering during heavy transitions or visual shader stacks is an **intentional safety feature**, not a bug. Bypassing frame-interpolation and visual smoothing on lower-end devices keeps the system operating within safe limits, actively preventing thermal throttling and lockups so that critical audio outputs and core cue triggers fire flawlessly.
+
+### 1.4 Secure IPC Bridge Boundary
 To protect the booth from rendering crashes, v1.5.1 completely isolates the React user interface from the underlying execution systems.
 
 The `coreAppAPI` and `tuxShowAPI` act as an Inter-Process Communication (IPC) bridge. If the UI thread stutters while rendering a complex cue list, the backend `timelineWorker.js` remains completely insulated, ensuring your audio and video cues continue firing with frame-accurate precision.
 
-### 1.4 Plugin Extensibility System
+### 1.5 Plugin Extensibility System
 TuxShow supports third-party extensions via the **Plugin Manager GUI** (accessible by clicking the CPU icon in the top right).
 
 Users can install `.zip` or `.tar.gz` plugins to expand capabilities. To maintain our strict booth-stability philosophy, all plugins operate behind a **Canvas Firewall & Sandboxing** layer. This allows custom React UI tabs to be safely injected into the Inspector without risking access to the core `timelineWorker.js` thread.
@@ -44,7 +53,7 @@ The interface is built for the dark. Everything critical is accessible via tacti
 * **Master GO (`<Enter>`)**: The beating heart of the show. Fires the selected cue and instantly advances the playhead.
 * **Global Pause (`<Spacebar>`)**: Freezes all active media. *Note: Spacebar also engages frame-accurate timeline clock shifting. Re-pressing space resumes playback precisely from the frozen millisecond.*
 * **Hard-Stop**: Halts a specific cue immediately, dumping it from system memory. If programmed as a transition, it instantly fires the next cue.
-* **Panic Button (`!`)**: The emergency eject. Executes a global 1.5-second fade-out on all visual and audio elements, bringing the stage to true black and silence.
+* **Panic Button (`!`)**: The emergency eject. Instantly stops or fades out active visual and audio elements based on their individual cue configurations, bringing the stage to true black and silence.
 * **Record Button (`REC`)**: Captures the live Master Projection WebGL Canvas along with mixed playback audio (both video and audio cues) and records a native WebM video file directly to the local hard drive. Bypasses booth monitoring states: even if local audio monitoring is muted, the Web Audio API routes the playback streams directly to the WebM file's audio track to ensure a complete visual and auditory archive of the show.
 * **Operator Warning Toasts (New in 1.5.1)**: Displays instant, floating alert notifications in the bottom-right corner when hardware cues (like webhooks) fail to deliver, ensuring the operator knows of issues instantly without digging in logs.
 
@@ -52,7 +61,7 @@ The interface is built for the dark. Everything critical is accessible via tacti
 > 
 > **SM**: *"Hold! Actor tripped on the stairs downstage. Video, kill the projections, go to black!"*
 > 
-> **Operator**: *"Hitting Panic!"* (Operator smashes the `!` key. The active tornado projection gracefully fades to pure black in 1.5 seconds). *"Projections are dark. We are clear for crew."*
+> **Operator**: *"Hitting Panic!"* (Operator smashes the `!` key. The active tornado projection stops or fades to pure black according to its configured fade-out duration). *"Projections are dark. We are clear for crew."*
 
 ### 2.2 Left-Panel Toolbar Utilities
 * **View Toggles**: Switch between List View (standard script format) and Timeline View (horizontal multi-track alignment).
@@ -146,6 +155,15 @@ The **Pack Workspace** feature uses the `.TSPack` architecture. Instead of choki
 Understanding how the `timelineWorker.js` evaluates cue behavior at its 60Hz evaluation intervals is critical for complex programming.
 
 ### 6.1 Media Cues
+
+To ensure optimal performance and avoid playback errors during live shows, verify that all imported media files conform to the following explicit format specifications:
+
+| Media Type | Supported Extensions | Optimal Playback Guidelines & Transparency Requirements |
+| :--- | :--- | :--- |
+| **Video** | `.webm`, `.mp4` | **VP9/WebM format is strictly required** for visual assets containing alpha channel transparency overlays. Standard `.mp4` files render with solid black background frames. |
+| **Audio** | `.wav`, `.mp3`, `.ogg` | **Uncompressed `.wav` is strongly recommended** for critical sound cues to guarantee zero-latency trigger responses and bypass browser decoding overhead. |
+| **Images** | `.png`, `.jpg` | **`.png` is strictly required** for overlays, masks, and boundary templates that depend on transparency. |
+
 * **Video**:
   - *Technical Definition*: Renders 1080p WebM/MP4 frames directly to WebGL textures.
   - *Trigger Behavior*: Standard overlap supported. Fade-targets apply to opacity.
@@ -181,7 +199,8 @@ Understanding how the `timelineWorker.js` evaluates cue behavior at its 60Hz eva
 ### 6.2 Visual Effects & Shaders
 When an active visual cue (Video, Image, or Live Camera) is selected, the **Effects** tab in the Inspector provides access to real-time WebGL shader pipelines.
 
-*Performance Warning: Stacking multiple active shaders significantly increases GPU load. If the System Profiler detects severe frame dropping, it will forcefully bypass these shaders to maintain baseline video playback. Proceed with caution when deploying heavily stacked effects on integrated graphics or low-RAM environments.*
+> [!WARNING]
+> **Low-Hardware Reassurance & Automatic Shader Bypass**: Stacking multiple active visual shaders significantly increases GPU processing load. If the System Profiler has locked the host device into the **Basic (15fps)** tier, the engine will automatically bypass heavy visual shaders and transitions to protect the core system. This is an **intentional safety safeguard** to prevent thermal throttling, ensuring the host machine remains completely stable and critical audio or network lighting cues fire reliably. If you experience visual stuttering or shader bypass, this is active proof that the software's self-protection mechanisms are keeping the show running.
 
 * **Color Correction (HSB)**:
   - *Capabilities*: Provides individual scalar controls for Hue, Saturation, and Brightness.
@@ -292,6 +311,10 @@ When an active visual cue (Video, Image, or Live Camera) is selected, the **Effe
 * **OSC**: Bi-directional string transmission on **UDP port 53000** (e.g., triggering digital audio consoles).
 * **MSC**: Legacy hex-packet macros via ALSA bindings to sync with lighting boards.
 * **DMX Lighting**: Art-Net universe broadcasting evaluated at **44Hz** via `dmxEngine.js`. Used to control physical LED fixtures.
+  - *Network Configuration & Patching Guide*: To route and patch DMX fixtures, navigate in the graphical console to `Settings -> Hardware Routing -> Art-Net Configuration`. Under this panel, the operator must configure:
+    - **Target IP Address**: The unicast IPv4 address of your physical Art-Net-to-DMX node interface device (e.g., `192.168.1.50`).
+    - **Universe Mapping**: The target Art-Net Subnet and Universe numbers corresponding directly to the physical DMX output port wired to your fixtures (e.g., Subnet 0, Universe 0).
+  Once set up, individual DMX cues in the show file will stream lighting value sequences (channel levels from 0 to 255) over the ethernet network directly to your lights.
 * **Projector Management**: Automates physical shutter lenses and projector power states using raw TCP PJLink profiles.
 
 ---
@@ -320,6 +343,27 @@ The Emerald City backdrop needs to be projected onto two large, angled physical 
 
 ### 7. Scene 7 (The Melting & Return)
 As the witch melts, the operator triggers a slow sequence that fades out the active castle elements, unmasks the floor, and triggers a reverse Fade-Target. The system comes full circle, returning smoothly to the locked, 0% saturation sepia Kansas farm environment.
+
+---
+
+## Appendix B: Tech Week Troubleshooting
+
+Tech week is high-stress, and minor configuration mistakes can lead to instant panic in the booth. When a system appears broken under time pressure, run through this quick-reference troubleshooting checklist before restarting the application.
+
+### 1. No Audio Playback over the PA System
+* **Symptom**: Audio cues show they are playing in the UI, but no sound is coming through the speakers.
+* **The Quick Fix**: Do not rely on the host operating system's sound settings. Navigate to `Settings -> Audio Device` and verify the selected device in the **setSinkId hardware dropdown**. Ensure it is routed directly to your physical USB Audio Interface or digital mixing board rather than defaulting to the OS system mixer or internal laptop speakers.
+
+### 2. Projector Flashing, Dropping, or Blanking Out
+* **Symptom**: The projection screen periodically goes blue, displays a "No Signal" logo, or flashes/drops frames.
+* **The Quick Fix**: Visual display drops are almost always hardware-level connection errors. Before rebooting TuxShow, check the physical **HDMI / EDID cables** and adapters at both the host machine and the projector input. An unstable connection or incorrect EDID handshake will trigger display drops. Use dedicated active HDMI repeaters or EDID emulators if running lines longer than 15 feet.
+
+### 3. Progressive Web Apps (PWAs) Not Connecting (iPad / Mobile Remote)
+* **Symptom**: Backstage monitors (`/viewer`), wireless camera inputs (`/camera`), or trigger decks (`/deck`) display connection errors or refuse to load on iPads/phones.
+* **The Quick Fix**:
+  1. **Wi-Fi Check**: Verify that the remote mobile device is connected to the dedicated, hidden **booth router** network, not the school's public or guest Wi-Fi.
+  2. **IP & Port Check**: Ensure the device is hitting the exact IP address and port shown in the host machine's settings tab.
+  3. **Security Gateway PIN**: Confirm the Stage Manager or operator has typed the correct security PIN to authenticate. An incorrect PIN will trigger an immediate HTTP 401 Unauthorized block, preventing access to the network feed.
 
 ---
 

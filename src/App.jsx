@@ -2658,6 +2658,9 @@ export default function App() {
       } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
          e.preventDefault();
          handleGo();
+      } else if (e.key === '!' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+         e.preventDefault();
+         setCues(prev => prev.map(c => c.state === 'playing' ? { ...c, state: c.fadeOutTime > 0 ? 'stopping' : 'stopped' } : c));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
